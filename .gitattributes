@@ -1,0 +1,7 @@
+# Keep development files out of the archives Packagist builds from the tags of the dist
+# repository. The main exclusion is the split prefix itself — only lib/contentfly-admin/
+# reaches the dist repository, so the harness, the tooling and the backlog never get near
+# it. This file covers what grows inside the package later.
+/tests              export-ignore
+/phpunit.xml.dist   export-ignore
+/.gitattributes     export-ignore

@@ -5,12 +5,12 @@ declare(strict_types=1);
 namespace Areanet\ContentflyAdmin;
 
 /**
- * Version des Admin-Pakets.
+ * The version of the admin package.
  *
- * Einzige Quelle der Wahrheit für die ausgelieferte Version: die composer.json trägt
- * bewusst kein `version`-Feld, der Tag steuert die Veröffentlichung. Damit Tag und Paket
- * nicht auseinanderlaufen, vergleicht tools/ci/paket-veroeffentlichen.sh den Release-Tag
- * gegen diese Konstante und bricht bei Abweichung ab.
+ * The single source of truth for what is released: composer.json deliberately carries no
+ * `version` field, the tag drives the release. To keep tag and package from drifting apart,
+ * tools/ci/paket-veroeffentlichen.sh compares the release tag against this constant and
+ * aborts when they differ.
  */
 final class Version
 {
