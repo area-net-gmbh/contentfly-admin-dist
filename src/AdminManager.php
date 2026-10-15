@@ -6,6 +6,7 @@ namespace Areanet\ContentflyAdmin;
 
 use Areanet\ContentflyAdmin\Controller\AdminController;
 use Areanet\ContentflyAdmin\Schema\SchemaClient;
+use Areanet\ContentflyAdmin\Schema\VersionGuard;
 use Areanet\PIM\Classes\Kernel\ApplicationInterface;
 
 /**
@@ -110,6 +111,10 @@ final class AdminManager
 
         $this->app[SchemaClient::CONTAINER_KEY] = static function ($app): SchemaClient {
             return new SchemaClient($app);
+        };
+
+        $this->app[VersionGuard::CONTAINER_KEY] = static function (): VersionGuard {
+            return new VersionGuard();
         };
     }
 
