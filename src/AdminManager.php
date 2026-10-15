@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Areanet\ContentflyAdmin;
 
 use Areanet\ContentflyAdmin\Controller\AdminController;
+use Areanet\ContentflyAdmin\Schema\SchemaClient;
 use Areanet\PIM\Classes\Kernel\ApplicationInterface;
 
 /**
@@ -90,7 +91,26 @@ final class AdminManager
         $this->title    = self::validateTitle($options['title']);
         $this->entities = self::validateEntities($options['entities']);
 
+        $this->registerServices();
         $this->mountRoutes();
+    }
+
+    /**
+     * Puts the admin's services into the container.
+     *
+     * EVERY ONE OF THEM IS REGISTERED, NONE OF THEM IS READ. This runs while `custom/app.php`
+     * does, which is before `bindRoutes()` and long before a request exists — and it runs in
+     * every console run and install too. A closure counts as a lazy factory in
+     * `Kernel\Container`, so the `SchemaClient` is built on first access and not here; nothing
+     * in this method touches the schema, the database or the request.
+     */
+    private function registerServices(): void
+    {
+        $this->app[self::CONTAINER_KEY] = $this;
+
+        $this->app[SchemaClient::CONTAINER_KEY] = static function ($app): SchemaClient {
+            return new SchemaClient($app);
+        };
     }
 
     /**
@@ -120,8 +140,6 @@ final class AdminManager
      */
     private function mountRoutes(): void
     {
-        $this->app[self::CONTAINER_KEY] = $this;
-
         $this->app['routeManager']
             ->mount($this->prefix, AdminController::class)
             ->get('', false, 'indexAction');
@@ -142,14 +160,13 @@ final class AdminManager
      *
      * RESOLVED HERE AND NOT IN THE CONSTRUCTOR, and that is load-bearing. The manager is built
      * while `custom/app.php` runs, which is before `bindRoutes()` and long before a request is
-     * dispatched. Reading `$app['schema']` at that moment would resolve the container key,
-     * freeze it against `extend()` (see `Kernel\Container`) and open the database on every
-     * request, console run and install — including the ones that have no database yet.
+     * dispatched. Reading the schema at that moment would open the database on every request,
+     * console run and install — including the ones that have no database yet.
      *
-     * NOT EVERY KEY OF THE SCHEMA IS AN ENTITY. `_hash` carries the schema's own checksum —
-     * `Api::getSchema()` writes it in next to the entities, and the core skips it wherever it
-     * walks the schema (`Api.php:818`, `:998`, `:1147`). Reading the keys naively puts it in
-     * the menu as an entity named `_hash`.
+     * THE SCHEMA COMES FROM THE `SchemaClient` AND NOWHERE ELSE. It is the admin's single reader;
+     * going around it would build the schema a second time in the same request, and two readers
+     * are how a menu and a form end up disagreeing. The client also owns the detail that `_hash`
+     * sits in among the entity names.
      *
      * @return list<string>
      */
@@ -159,11 +176,7 @@ final class AdminManager
             return $this->entities;
         }
 
-        $names = array_keys($this->app['schema']);
-
-        return array_values(array_filter($names, static function ($name): bool {
-            return !str_starts_with((string) $name, '_');
-        }));
+        return $this->app[SchemaClient::CONTAINER_KEY]->getEntityNames();
     }
 
     /**
