@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Areanet\ContentflyAdmin;
 
+use Areanet\ContentflyAdmin\Controller\AdminController;
 use Areanet\PIM\Classes\Kernel\ApplicationInterface;
 
 /**
@@ -25,6 +26,17 @@ use Areanet\PIM\Classes\Kernel\ApplicationInterface;
  */
 final class AdminManager
 {
+    /**
+     * Where the manager puts itself so its own controllers can find it again.
+     *
+     * A project is free to name its container key — the example in the documentation says
+     * `$app['adminManager']`, but nothing enforces it. The controllers must not depend on that
+     * choice, and they cannot be handed the manager either: the core builds every controller
+     * itself as `new $controllerName($app)`. Hence a fixed key of our own, namespaced so it
+     * cannot collide with a project's.
+     */
+    public const CONTAINER_KEY = 'contentfly_admin.manager';
+
     /**
      * The options a project may pass, with the values that apply when it passes nothing.
      *
@@ -77,6 +89,42 @@ final class AdminManager
         $this->prefix   = self::validatePrefix($options['prefix']);
         $this->title    = self::validateTitle($options['title']);
         $this->entities = self::validateEntities($options['entities']);
+
+        $this->mountRoutes();
+    }
+
+    /**
+     * Registers the admin's routes with the core's route manager.
+     *
+     * CALLED FROM THE CONSTRUCTOR, because that is the whole contract a project gets: it writes
+     * one `new AdminManager($app)` into `custom/app.php` and is done. A separate `mount()` call
+     * would be one more line every project has to remember, and forgetting it would produce an
+     * admin that silently is not there.
+     *
+     * THE MOMENT IS THE POINT. `custom/app.php` is required in `bootstrap.php` immediately
+     * before `$app['routeManager']->bindRoutes()`, so the routes are collected in time. Reading
+     * `$app['routeManager']` here resolves that key — unavoidable, since mounting is the job,
+     * and harmless, because the bootstrap reads it on the next line anyway.
+     *
+     * The route name is the empty string so the path stays the mount path itself: the core
+     * prepends a slash to every route name, which is what makes `/admin/` — with the trailing
+     * slash — the canonical address. `/admin` without it matches no route at all, and the
+     * core's catch-all for CORS preflights then matches the path but not the method: the
+     * router reports MethodNotAllowed and the answer is 405, never 404. That is the core's
+     * documented behaviour for every unmatched path, not something the admin introduces
+     * (`bootstrap-web.php`, the OPTIONS catch-all); with debug output switched on, as in the
+     * harness, it surfaces as an error page with a stack trace instead.
+     *
+     * The action name is passed explicitly because the core would otherwise derive it from the
+     * empty route name and look for a method called `Action`.
+     */
+    private function mountRoutes(): void
+    {
+        $this->app[self::CONTAINER_KEY] = $this;
+
+        $this->app['routeManager']
+            ->mount($this->prefix, AdminController::class)
+            ->get('', false, 'indexAction');
     }
 
     public function getPrefix(): string
@@ -98,6 +146,11 @@ final class AdminManager
      * freeze it against `extend()` (see `Kernel\Container`) and open the database on every
      * request, console run and install — including the ones that have no database yet.
      *
+     * NOT EVERY KEY OF THE SCHEMA IS AN ENTITY. `_hash` carries the schema's own checksum —
+     * `Api::getSchema()` writes it in next to the entities, and the core skips it wherever it
+     * walks the schema (`Api.php:818`, `:998`, `:1147`). Reading the keys naively puts it in
+     * the menu as an entity named `_hash`.
+     *
      * @return list<string>
      */
     public function getEntities(): array
@@ -106,7 +159,11 @@ final class AdminManager
             return $this->entities;
         }
 
-        return array_keys($this->app['schema']);
+        $names = array_keys($this->app['schema']);
+
+        return array_values(array_filter($names, static function ($name): bool {
+            return !str_starts_with((string) $name, '_');
+        }));
     }
 
     /**
@@ -129,10 +186,12 @@ final class AdminManager
         }
 
         /*
-         * A dot would survive into the controller key. The core builds `<mountPath>.controller`
-         * and its middleware splits that string on dots and reads the third part — a prefix
-         * carrying its own dot shifts every part by one and the request dies in the core, far
-         * away from the line that caused it.
+         * A dot would survive into the controller key. The core builds
+         * `<mountPath>.controller:<action>`, lowercases it, turns the colon into a dot and
+         * splits the result to assemble its event names — `pim.controller.before.<part0>.<part2>`
+         * in `BaseControllerProvider`. An extra dot shifts those parts, so the before and after
+         * events fire under names nobody subscribed to. Nothing crashes; the hooks simply stop
+         * arriving, which is the kind of defect one looks for everywhere except in the prefix.
          */
         if (str_contains($prefix, '.')) {
             throw new \InvalidArgumentException(sprintf('The prefix "%s" must not contain a dot — the core builds its controller key from it.', $prefix));
