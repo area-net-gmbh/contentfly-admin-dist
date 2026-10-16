@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Areanet\ContentflyAdmin\Controller;
 
+use Areanet\ContentflyAdmin\Asset\MediaTypes;
 use Areanet\ContentflyAdmin\Version;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -34,32 +35,6 @@ final class AssetController
      * The one directory assets are served from. Nothing outside it is reachable.
      */
     private const ASSET_ROOT = __DIR__.'/../../public';
-
-    /**
-     * The media types this route serves, keyed by lowercase extension.
-     *
-     * AN EXTENSION MAP, NOT CONTENT SNIFFING — the opposite of what the core's `FileController`
-     * does, and deliberately so. The core serves what unknown clients uploaded, so it must not
-     * trust the claimed type. These files ship inside this package, so the extension is the
-     * most reliable thing about them; sniffing would read CSS and JavaScript as `text/plain`
-     * and a browser refuses an ES module under that type.
-     *
-     * An unlisted extension is not served. That keeps the list, not the directory, in charge of
-     * what this route can hand out.
-     *
-     * @var array<string,string>
-     */
-    private const MEDIA_TYPES = array(
-        'css'   => 'text/css; charset=UTF-8',
-        'js'    => 'text/javascript; charset=UTF-8',
-        'json'  => 'application/json',
-        'map'   => 'application/json',
-        'svg'   => 'image/svg+xml',
-        'woff2' => 'font/woff2',
-        'png'   => 'image/png',
-        'jpg'   => 'image/jpeg',
-        'ico'   => 'image/x-icon',
-    );
 
     /**
      * A single path segment: starts alphanumeric, then word characters, dot or dash.
@@ -110,14 +85,14 @@ final class AssetController
             return new Response('', 404);
         }
 
-        $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+        $mediaType = MediaTypes::forFile($path);
 
-        if (!isset(self::MEDIA_TYPES[$extension])) {
+        if ($mediaType === null) {
             return new Response('', 404);
         }
 
         $response = new BinaryFileResponse($path);
-        $response->headers->set('Content-Type', self::MEDIA_TYPES[$extension]);
+        $response->headers->set('Content-Type', $mediaType);
         $response->setAutoEtag();
         $response->setAutoLastModified();
 

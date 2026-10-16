@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Areanet\ContentflyAdmin;
 
 use Areanet\ContentflyAdmin\Controller\AdminController;
+use Areanet\ContentflyAdmin\Command\PublishAssetsCommand;
 use Areanet\ContentflyAdmin\Controller\AssetController;
 use Areanet\ContentflyAdmin\Schema\SchemaClient;
 use Areanet\ContentflyAdmin\Schema\VersionGuard;
@@ -47,10 +48,20 @@ final class AdminManager
      * ignored looks exactly like an option that does not work.
      */
     private const DEFAULTS = [
-        'prefix'   => '/admin',
-        'title'    => 'Contentfly Admin',
-        'entities' => [],
+        'prefix'    => '/admin',
+        'title'     => 'Contentfly Admin',
+        'entities'  => [],
+        'assetPath' => '',
     ];
+
+    /**
+     * Path segments the project's `.htaccess` answers with 403.
+     *
+     * The static asset copy has to land somewhere a client may actually fetch, and these are
+     * the names where it could not. Checked when the option is set rather than when the command
+     * runs, so a project learns about it at the one moment it is looking at the option.
+     */
+    private const BLOCKED_ASSET_SEGMENTS = ['bin', 'custom', 'lib', 'vendor', 'plugins', 'tools', 'tests', 'data'];
 
     /**
      * Path segments the core mounts itself in `bootstrap-web.php`.
@@ -70,6 +81,9 @@ final class AdminManager
     /** @var list<string> The configured whitelist; empty means "every entity of the schema". */
     private array $entities;
 
+    /** URL path of the static asset copy; empty means "serve through the route". */
+    private string $assetPath;
+
     /**
      * @param array<string,mixed> $options See self::DEFAULTS for the accepted keys.
      *
@@ -88,13 +102,15 @@ final class AdminManager
 
         $options = array_merge(self::DEFAULTS, $options);
 
-        $this->app      = $app;
-        $this->prefix   = self::validatePrefix($options['prefix']);
-        $this->title    = self::validateTitle($options['title']);
-        $this->entities = self::validateEntities($options['entities']);
+        $this->app       = $app;
+        $this->prefix    = self::validatePrefix($options['prefix']);
+        $this->title     = self::validateTitle($options['title']);
+        $this->entities  = self::validateEntities($options['entities']);
+        $this->assetPath = self::validateAssetPath($options['assetPath'], $this->prefix);
 
         $this->registerServices();
         $this->mountRoutes();
+        $this->registerCommands();
     }
 
     /**
@@ -175,6 +191,25 @@ final class AdminManager
             ->get('{version}/{dir}/{sub}/{file}', false, 'serveAction');
     }
 
+    /**
+     * Makes the admin's console commands available.
+     *
+     * NO OPT-IN LINE IN THE PROJECT. A command a project has to register first is a command
+     * nobody finds, and zero configuration is a hard rule here — so it is always *available*
+     * while staying entirely optional to *run*.
+     *
+     * `addCommand()` goes through `$app->extend('dispatcher', …)`, and Pimple freezes a
+     * definition the moment it has been read once. This is safe at exactly this point in the
+     * boot: `custom/app.php` runs before `bindRoutes()`, and nothing reads `dispatcher` until a
+     * controller provider's `connect()` does. Whoever moves this call later gets a
+     * `FrozenServiceException`, which is the failure `000-000-0006` of the core already paid
+     * for once.
+     */
+    private function registerCommands(): void
+    {
+        $this->app['consoleManager']->addCommand(new PublishAssetsCommand());
+    }
+
     public function getPrefix(): string
     {
         return $this->prefix;
@@ -191,11 +226,28 @@ final class AdminManager
      * THE VERSION SEGMENT IS WHAT MAKES THE ADDRESS CACHEABLE FOREVER (ADR 0007). It comes from
      * `Version::VERSION` and is therefore no second thing to maintain — the release moves it.
      *
+     * WITH `assetPath` SET IT POINTS AT THE STATIC COPY INSTEAD, and then no PHP is involved in
+     * delivering the file at all — the project's `.htaccess` hands out an existing file before
+     * it ever reaches the front controller. That is the whole mechanism behind the optional
+     * production path; `Command\PublishAssetsCommand` puts the files there.
+     *
      * @param string $path path relative to the package's asset directory, e.g. `admin.css`
      */
     public function assetUrl(string $path): string
     {
-        return $this->prefix.'/_asset/'.Version::VERSION.'/'.ltrim($path, '/');
+        $base = $this->assetPath !== ''
+            ? $this->assetPath
+            : $this->prefix.'/_asset';
+
+        return $base.'/'.Version::VERSION.'/'.ltrim($path, '/');
+    }
+
+    /**
+     * The URL path of the static asset copy, or an empty string when the route serves them.
+     */
+    public function getAssetPath(): string
+    {
+        return $this->assetPath;
     }
 
     public function getTitle(): string
@@ -225,6 +277,68 @@ final class AdminManager
         }
 
         return $this->app[SchemaClient::CONTAINER_KEY]->getEntityNames();
+    }
+
+    /**
+     * Checks the URL path of the static asset copy.
+     *
+     * THE ONE RULE THAT MATTERS: IT MUST NOT LIE UNDER THE ADMIN PREFIX. The front controller
+     * only runs for a path that is not an existing directory, so a copy inside
+     * `<docroot><prefix>/` would make `<prefix>/` itself a real directory — and the admin's own
+     * entry page would stop reaching PHP and answer 403 or a directory listing instead. The
+     * optimisation would switch off exactly the page it is meant to speed up. That is the heart
+     * of ADR 0007 and the reason this check exists rather than a comment.
+     *
+     * @param mixed $assetPath
+     *
+     * @throws \InvalidArgumentException on a path that cannot work
+     */
+    private static function validateAssetPath($assetPath, string $prefix): string
+    {
+        if ($assetPath === '' || $assetPath === null) {
+            return '';
+        }
+
+        if (!is_string($assetPath)) {
+            throw new \InvalidArgumentException('The option "assetPath" must be a string, for example "/admin-assets".');
+        }
+
+        if (!str_starts_with($assetPath, '/')) {
+            throw new \InvalidArgumentException(sprintf('The asset path "%s" must start with a slash, for example "/admin-assets".', $assetPath));
+        }
+
+        if (str_ends_with($assetPath, '/')) {
+            throw new \InvalidArgumentException(sprintf('The asset path "%s" must not end with a slash — the version segment is appended.', $assetPath));
+        }
+
+        if ($assetPath === $prefix || str_starts_with($assetPath, $prefix.'/')) {
+            throw new \InvalidArgumentException(sprintf(
+                'The asset path "%s" must not lie under the admin prefix "%s". A directory there '
+                .'stops the prefix itself from reaching the front controller, and the admin\'s '
+                .'entry page would no longer answer. Pick a path next to it, for example "%s-assets".',
+                $assetPath,
+                $prefix,
+                rtrim($prefix, '/')
+            ));
+        }
+
+        $firstSegment = strtolower(explode('/', ltrim($assetPath, '/'))[0]);
+
+        if ($firstSegment === '' || str_starts_with($firstSegment, '.')) {
+            throw new \InvalidArgumentException(sprintf('The asset path "%s" must name a directory and must not start with a dot.', $assetPath));
+        }
+
+        if (in_array($firstSegment, self::BLOCKED_ASSET_SEGMENTS, true)) {
+            throw new \InvalidArgumentException(sprintf(
+                'The asset path "%s" starts with "%s", which the project\'s .htaccess answers '
+                .'with 403 — nothing copied there can be fetched. Reserved are: %s.',
+                $assetPath,
+                $firstSegment,
+                implode(', ', self::BLOCKED_ASSET_SEGMENTS)
+            ));
+        }
+
+        return $assetPath;
     }
 
     /**
