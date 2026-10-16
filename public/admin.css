@@ -1,0 +1,42 @@
+/*
+ * Base styles for the admin.
+ *
+ * DELIBERATELY MINIMAL. Story 001-007 builds the delivery path, not the design — the real
+ * styling arrives with the views in epic 002. What this file has to do today is be a real
+ * stylesheet that visibly applies, so the delivery can be proven end to end.
+ */
+
+:root {
+    --admin-text: #2f2f2f;
+    --admin-background: #ffffff;
+    --admin-accent: #3c80ac;
+    --admin-rule: #ededed;
+}
+
+body {
+    margin: 0;
+    padding: 2rem;
+    background: var(--admin-background);
+    color: var(--admin-text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.5;
+}
+
+h1 {
+    margin: 0 0 1.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid var(--admin-accent);
+    font-size: 1.5rem;
+    font-weight: 600;
+}
+
+ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+li {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--admin-rule);
+}

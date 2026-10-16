@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Areanet\ContentflyAdmin;
 
 use Areanet\ContentflyAdmin\Controller\AdminController;
+use Areanet\ContentflyAdmin\Controller\AssetController;
 use Areanet\ContentflyAdmin\Schema\SchemaClient;
 use Areanet\ContentflyAdmin\Schema\VersionGuard;
 use Areanet\PIM\Classes\Kernel\ApplicationInterface;
@@ -148,6 +149,30 @@ final class AdminManager
         $this->app['routeManager']
             ->mount($this->prefix, AdminController::class)
             ->get('', false, 'indexAction');
+
+        /*
+         * THE ASSETS GET A MOUNT OF THEIR OWN, and it has to be that way: a mount binds exactly
+         * one controller class, and `RouteManager` keys its providers by mount path — a second
+         * `mount($this->prefix, …)` would not add anything, it would replace the admin.
+         *
+         * The one cost is that `CustomControllerProvider::connect()` registers the core's global
+         * `before`/`after` middleware once more. That is not a new condition the admin
+         * introduces: the core mounts four providers of its own in `bootstrap-web.php` and every
+         * one of them does the same, so the middleware is already registered several times over.
+         *
+         * THREE ROUTES OF FIXED DEPTH instead of one catch-all, because a placeholder in this
+         * core matches a single segment and nothing reachable from a package can widen it
+         * (ADR 0007). Three depths cover `admin.css` and `controllers/hello_controller.js`; a
+         * deeper tree needs a fourth line here, which is the trade-off that decision accepted.
+         *
+         * `false` is the `isSecure` flag — assets are served without a login on purpose, see
+         * `AssetController`.
+         */
+        $this->app['routeManager']
+            ->mount($this->prefix.'/_asset', AssetController::class)
+            ->get('{version}/{file}', false, 'serveAction')
+            ->get('{version}/{dir}/{file}', false, 'serveAction')
+            ->get('{version}/{dir}/{sub}/{file}', false, 'serveAction');
     }
 
     public function getPrefix(): string
