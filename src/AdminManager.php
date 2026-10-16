@@ -8,6 +8,7 @@ use Areanet\ContentflyAdmin\Controller\AdminController;
 use Areanet\ContentflyAdmin\Command\PublishAssetsCommand;
 use Areanet\ContentflyAdmin\Controller\AssetController;
 use Areanet\ContentflyAdmin\Schema\SchemaClient;
+use Areanet\ContentflyAdmin\Schema\ShapingListener;
 use Areanet\ContentflyAdmin\Schema\VersionGuard;
 use Areanet\PIM\Classes\Kernel\ApplicationInterface;
 
@@ -111,6 +112,7 @@ final class AdminManager
         $this->registerServices();
         $this->mountRoutes();
         $this->registerCommands();
+        $this->registerSchemaListener();
     }
 
     /**
@@ -208,6 +210,36 @@ final class AdminManager
     private function registerCommands(): void
     {
         $this->app['consoleManager']->addCommand(new PublishAssetsCommand());
+    }
+
+    /**
+     * Hooks the field shaping of stage 2 into the core's schema generation.
+     *
+     * NO OPT-IN LINE IN THE PROJECT, for the same reason the commands have none: zero
+     * configuration is a hard rule, and an `#[Admin]` attribute that only takes effect after a
+     * project registers something is an attribute that silently does nothing.
+     *
+     * `extend('dispatcher', …)` AND NOT `Application::on()`: `on()` is not part of
+     * `ApplicationInterface`, which is what this class types `$app` as. `extend()` is both the
+     * type-safe route and the one the core itself takes — `Manager\ConsoleManager::addCommand()`
+     * registers its listener exactly this way.
+     *
+     * THE TIMING IS LOAD-BEARING. Pimple freezes a definition the moment it has been read once,
+     * and `dispatcher` is a lazy factory. This is safe at exactly this point in the boot because
+     * `custom/app.php` runs before `bindRoutes()` and nothing reads `dispatcher` until a
+     * controller provider's `connect()` does. Whoever moves this call later gets a
+     * `FrozenServiceException` — the same failure `registerCommands()` already documents.
+     *
+     * Registering reads nothing: no schema, no database, no request. The constructor also runs
+     * in every console run and during installation.
+     */
+    private function registerSchemaListener(): void
+    {
+        $this->app->extend('dispatcher', static function ($dispatcher) {
+            $dispatcher->addListener(ShapingListener::EVENT, new ShapingListener());
+
+            return $dispatcher;
+        });
     }
 
     public function getPrefix(): string
