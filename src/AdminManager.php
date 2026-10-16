@@ -180,6 +180,24 @@ final class AdminManager
         return $this->prefix;
     }
 
+    /**
+     * The URL one asset of this package is served under.
+     *
+     * THE ONE PLACE THAT KNOWS THE SHAPE OF AN ASSET URL. The prefix is the project's choice and
+     * the version belongs to the package, so neither may be written out anywhere else: a second
+     * place that builds this string is a place that will still say `/admin` after a project
+     * picked something else.
+     *
+     * THE VERSION SEGMENT IS WHAT MAKES THE ADDRESS CACHEABLE FOREVER (ADR 0007). It comes from
+     * `Version::VERSION` and is therefore no second thing to maintain — the release moves it.
+     *
+     * @param string $path path relative to the package's asset directory, e.g. `admin.css`
+     */
+    public function assetUrl(string $path): string
+    {
+        return $this->prefix.'/_asset/'.Version::VERSION.'/'.ltrim($path, '/');
+    }
+
     public function getTitle(): string
     {
         return $this->title;

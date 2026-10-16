@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Areanet\ContentflyAdmin\Controller;
 
 use Areanet\ContentflyAdmin\AdminManager;
+use Areanet\ContentflyAdmin\Asset\Importmap;
 use Areanet\ContentflyAdmin\Schema\CoreVersionMismatch;
 use Areanet\ContentflyAdmin\Schema\VersionGuard;
 use Symfony\Component\HttpFoundation\Response;
@@ -53,9 +54,33 @@ final class AdminController
 
         $title = htmlspecialchars($manager->getTitle(), ENT_QUOTES, 'UTF-8');
 
+        /*
+         * THE PAGE IS STILL NOT A USER INTERFACE — it now also proves the asset path.
+         *
+         * Stylesheet, import map and the module below are what turns story 001-007 from "files
+         * are reachable by URL" into "the browser actually loads and runs them". A stylesheet
+         * that 404s looks exactly like one that was never linked, so the proof has to happen in
+         * a page, not only in a `curl` call.
+         *
+         * `data-controller="hello"` is the hook Stimulus looks for; the controller sets
+         * `data-admin-assets-ready` on connect, which is a state a check can read without a
+         * human looking at the screen.
+         */
+        $assets = '<link rel="stylesheet" href="'
+            .htmlspecialchars($manager->assetUrl('admin.css'), ENT_QUOTES, 'UTF-8')
+            .'">'
+            .Importmap::scriptTag($manager)
+            .'<script type="module">'
+            ."import { Application } from '@hotwired/stimulus';"
+            ."import HelloController from 'admin/hello';"
+            .'Application.start().register(\'hello\', HelloController);'
+            .'</script>';
+
         $html = '<!doctype html>'
-            .'<html lang="de"><head><meta charset="utf-8"><title>'.$title.'</title></head>'
-            .'<body><h1>'.$title.'</h1><ul>'.$items.'</ul></body></html>';
+            .'<html lang="de"><head><meta charset="utf-8"><title>'.$title.'</title>'
+            .$assets
+            .'</head>'
+            .'<body data-controller="hello"><h1>'.$title.'</h1><ul>'.$items.'</ul></body></html>';
 
         return new Response($html, 200, array('Content-Type' => 'text/html; charset=UTF-8'));
     }
