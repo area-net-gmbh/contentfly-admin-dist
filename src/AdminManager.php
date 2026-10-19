@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Areanet\ContentflyAdmin;
 
+use Areanet\ContentflyAdmin\Auth\AdminAuthenticator;
 use Areanet\ContentflyAdmin\Controller\AdminController;
 use Areanet\ContentflyAdmin\Command\PublishAssetsCommand;
 use Areanet\ContentflyAdmin\Controller\AssetController;
@@ -111,6 +112,7 @@ final class AdminManager
 
         $this->registerServices();
         $this->mountRoutes();
+        $this->registerAuthBridge();
         $this->registerCommands();
         $this->registerSchemaListener();
     }
@@ -135,6 +137,35 @@ final class AdminManager
         $this->app[VersionGuard::CONTAINER_KEY] = static function (): VersionGuard {
             return new VersionGuard();
         };
+
+        $prefix = $this->prefix;
+
+        $this->app[AdminAuthenticator::CONTAINER_KEY] = static function ($app) use ($prefix): AdminAuthenticator {
+            return new AdminAuthenticator($app, $prefix);
+        };
+    }
+
+    /**
+     * Hangs the cookie-to-header translation in front of every request.
+     *
+     * THE ADMIN'S SESSION IS A COOKIE AND THE CORE DOES NOT READ COOKIES — it looks in five
+     * places, none of them one (`Classes/Security/TokenSources.php`). Something has to carry the
+     * token across, and this hook is it: `$app->before()` runs on `kernel.request` and for the
+     * main request only, while the core's route guard runs later, on `kernel.controller`. The
+     * header is therefore set before anything checks for it. ADR 0009.
+     *
+     * THE HOOK IS REGISTERED GLOBALLY AND ACTS NARROWLY. It has to be global — there is no
+     * per-mount `before` in this core that runs early enough — so the limit to the admin's own
+     * prefix lives in `AdminAuthenticator::applyTokenHeader()`, together with the reason it
+     * matters. Registering it costs nothing before a request exists: `Application::on()` only
+     * extends the `dispatcher` factory while the app is unbooted, so no container key is resolved
+     * here, which is the same promise `registerServices()` makes.
+     */
+    private function registerAuthBridge(): void
+    {
+        $this->app->before(static function ($request, $app): void {
+            $app[AdminAuthenticator::CONTAINER_KEY]->applyTokenHeader($request);
+        });
     }
 
     /**
@@ -161,12 +192,31 @@ final class AdminManager
      *
      * The action name is passed explicitly because the core would otherwise derive it from the
      * empty route name and look for a method called `Action`.
+     *
+     * THREE ROUTES ON ONE MOUNT, not three mounts. A mount binds one controller class and
+     * `RouteManager` keys its providers by mount path, but the routes *inside* one provider are
+     * keyed by their own name — so `login` and `logout` fit next to the index route and come out
+     * as `/admin/login` and `/admin/logout`. Mounting them separately would have been the other
+     * way to get a second controller class, at the price of their paths: a mount's own route is
+     * the empty name, so `/admin/login` would have become `/admin/login/`, with the bare form
+     * answering 405. The actions here stay thin on purpose — the work is in `AdminAuthenticator`,
+     * which is where ADR 0009 puts it.
+     *
+     * THE SECOND ARGUMENT IS `isSecure`, and the three values are each deliberate. The index is
+     * `true` as of story 002-001: until then `/admin/` was open to anyone who knew the path, and
+     * the flag is what hangs the core's five-source token check in front of it. `login` is
+     * `false` because a login route that demands a login cannot be reached. `logout` is `true`,
+     * and that is not symmetry — `logoutAction` in the core acts on `auth.token`/`auth.user`,
+     * which only the guard of a **main** request sets; from an unsecured route it would answer
+     * 200 and delete nothing.
      */
     private function mountRoutes(): void
     {
         $this->app['routeManager']
             ->mount($this->prefix, AdminController::class)
-            ->get('', false, 'indexAction');
+            ->get('', true, 'indexAction')
+            ->post('login', false, 'loginAction')
+            ->get('logout', true, 'logoutAction');
 
         /*
          * THE ASSETS GET A MOUNT OF THEIR OWN, and it has to be that way: a mount binds exactly
