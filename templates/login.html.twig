@@ -1,0 +1,62 @@
+{#
+    The sign-in mask — the admin's first real page.
+
+    EVERY VALUE HERE IS ESCAPED BY TWIG, which is the reason this is a template and not a
+    concatenated string: `alias` comes straight back from what somebody typed, and `error` is
+    assembled from a core response. One forgotten `htmlspecialchars()` in a string version
+    would be an injection point that looks like working markup.
+
+    `importmap` IS THE ONE EXCEPTION AND IS SAFE. It is a finished `<script type="importmap">`
+    element built by `Importmap::scriptTag()`, which JSON-encodes with `JSON_HEX_TAG` so that
+    nothing a project puts in its prefix can close the element early. Escaping it here would
+    print the markup instead of applying it.
+
+    IMPORTING TURBO STARTS IT. The vendored ES module calls `start()` at top level, so the bare
+    import is the whole wiring — the form below then submits through Turbo instead of a full
+    page load. No Stimulus here: the mask has no interactive widget, and loading a second
+    library to do nothing is still loading it.
+#}<!doctype html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="{{ stylesheet }}">
+    {{ importmap|raw }}
+    <script type="module">import '@hotwired/turbo';</script>
+</head>
+<body class="login-page">
+<main class="login">
+    <h1 class="login__title">{{ title }}</h1>
+
+    {% if error %}
+        <p class="login__error" role="alert">{{ error }}</p>
+    {% endif %}
+
+    <form class="login__form" method="post" action="{{ action }}">
+        <input type="hidden" name="{{ tokenField }}" value="{{ token }}">
+
+        <label class="login__label" for="login-alias">Benutzername</label>
+        <input class="login__input"
+               id="login-alias"
+               type="text"
+               name="alias"
+               value="{{ alias }}"
+               autocomplete="username"
+               autocapitalize="none"
+               required
+               autofocus>
+
+        <label class="login__label" for="login-pass">Passwort</label>
+        <input class="login__input"
+               id="login-pass"
+               type="password"
+               name="pass"
+               autocomplete="current-password"
+               required>
+
+        <button class="login__submit" type="submit">Anmelden</button>
+    </form>
+</main>
+</body>
+</html>

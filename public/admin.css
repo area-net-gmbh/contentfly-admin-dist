@@ -40,3 +40,86 @@ li {
     padding: 0.5rem 0;
     border-bottom: 1px solid var(--admin-rule);
 }
+
+/*
+ * The sign-in mask (002-001-0003).
+ *
+ * The first styles in this file that exist for a person rather than for a proof. They are
+ * deliberately scoped to `.login*` classes: epic 002 builds the real layout on top of this file,
+ * and a rule that styled bare `form` or `input` would reach into every view written later.
+ */
+
+.login-page {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    /* `body` already carries 2rem of padding, so a bare 100vh would overflow by exactly that. */
+    min-height: calc(100vh - 4rem);
+}
+
+.login {
+    width: 100%;
+    max-width: 22rem;
+}
+
+.login__title {
+    margin-bottom: 1.25rem;
+}
+
+/*
+ * The error is announced, not only coloured. `role="alert"` in the template makes a screen
+ * reader say it; the left rule makes it findable without reading, and the colour alone is
+ * never the carrier of the message.
+ */
+.login__error {
+    margin: 0 0 1.25rem;
+    padding: 0.75rem 1rem;
+    border-left: 3px solid #b3261e;
+    background: #fdecea;
+    color: #8c1d18;
+}
+
+.login__form {
+    display: flex;
+    flex-direction: column;
+}
+
+.login__label {
+    margin-bottom: 0.25rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+.login__input {
+    margin-bottom: 1rem;
+    padding: 0.625rem 0.75rem;
+    border: 1px solid var(--admin-rule);
+    border-radius: 3px;
+    font: inherit;
+    color: inherit;
+}
+
+.login__input:focus-visible {
+    outline: 2px solid var(--admin-accent);
+    outline-offset: 1px;
+}
+
+.login__submit {
+    padding: 0.625rem 1rem;
+    border: 0;
+    border-radius: 3px;
+    background: var(--admin-accent);
+    color: #ffffff;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.login__submit:hover {
+    filter: brightness(0.94);
+}
+
+.login__submit:focus-visible {
+    outline: 2px solid var(--admin-text);
+    outline-offset: 2px;
+}

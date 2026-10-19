@@ -7,6 +7,7 @@ namespace Areanet\ContentflyAdmin\Controller;
 use Areanet\ContentflyAdmin\AdminManager;
 use Areanet\ContentflyAdmin\Asset\Importmap;
 use Areanet\ContentflyAdmin\Auth\AdminAuthenticator;
+use Areanet\ContentflyAdmin\Auth\LoginScreen;
 use Areanet\ContentflyAdmin\Schema\CoreVersionMismatch;
 use Areanet\ContentflyAdmin\Schema\VersionGuard;
 use Symfony\Component\HttpFoundation\RedirectResponse;
@@ -22,14 +23,28 @@ use Symfony\Component\HttpFoundation\Response;
  * signature — `CustomControllerProvider::connect()` builds every controller as
  * `new $controllerName($app)`, so that shape is fixed from the outside.
  *
- * WHAT THIS IS NOT YET: a user interface. The index page is the proof that the mount works and
- * nothing more, and the two auth routes next to it answer in status codes rather than in pages —
- * they exist so the sign-in can be exercised end to end before there is anything to look at. The
- * login screen and the Turbo-conformant submit are story 002-001-0003, layout and navigation are
- * 002-002.
+ * WHAT THIS IS NOT YET: a user interface for working. Signing in is now a page a person can
+ * use, but the index behind it is still the proof that the mount and the asset path work —
+ * layout, navigation and the menu from the schema are story 002-002. That is also why the
+ * index page is still built by concatenating strings while the login mask is a Twig template:
+ * the mask is new and takes input, the index page is an existing proof artifact that 002-002
+ * replaces wholesale. One rendering path is leftover and has a named successor, which is
+ * better than rewriting a proof in passing (ADR 0010).
+ *
+ * THE ACTIONS STAY THIN. What decides anything lives next door: the session mechanics in
+ * `AdminAuthenticator` (ADR 0009), the mask and its form token in `LoginScreen`.
  */
 final class AdminController
 {
+    /** Wrong alias or password — deliberately not saying which of the two. */
+    private const MESSAGE_CREDENTIALS = 'Benutzername oder Passwort ist falsch.';
+
+    /** The core's throttle has had enough; `%d` is its own `Retry-After` in seconds. */
+    private const MESSAGE_THROTTLED = 'Zu viele Fehlversuche. Bitte in %d Sekunden erneut versuchen.';
+
+    /** The form token did not match — a stale form, a second tab, or a forged post. */
+    private const MESSAGE_TOKEN = 'Das Formular war nicht mehr gültig. Bitte erneut anmelden.';
+
     /** @var \Areanet\PIM\Classes\Kernel\ApplicationInterface */
     private $app;
 
@@ -71,12 +86,19 @@ final class AdminController
          * `data-controller="hello"` is the hook Stimulus looks for; the controller sets
          * `data-admin-assets-ready` on connect, which is a state a check can read without a
          * human looking at the screen.
+         *
+         * TURBO IS IMPORTED FOR ITS SIDE EFFECT. The vendored ES module calls `start()` at top
+         * level, so the bare import is the whole wiring. It belongs on this page and not only
+         * on the login mask: without it the redirect a successful sign-in sends the browser to
+         * would arrive as an ordinary page load, and the Turbo-conformant submit would be
+         * provable only on the way in, never on the way through.
          */
         $assets = '<link rel="stylesheet" href="'
             .htmlspecialchars($manager->assetUrl('admin.css'), ENT_QUOTES, 'UTF-8')
             .'">'
             .Importmap::scriptTag($manager)
             .'<script type="module">'
+            ."import '@hotwired/turbo';"
             ."import { Application } from '@hotwired/stimulus';"
             ."import HelloController from 'admin/hello';"
             .'Application.start().register(\'hello\', HelloController);'
@@ -92,18 +114,20 @@ final class AdminController
     }
 
     /**
-     * Takes the credentials of the login form and turns a successful sign-in into a session.
+     * Serves the sign-in mask and takes its submission.
      *
-     * THIS ACTION IS DELIBERATELY THIN. Everything that decides anything — how the core is asked,
-     * which token is requested, what the cookie looks like — lives in `AdminAuthenticator`,
-     * because ADR 0009 puts the one meeting point of the admin's session and the core's token
-     * expectation there and not in a controller.
+     * ONE ROUTE FOR BOTH METHODS, AND THAT IS NOT A STYLE CHOICE. `CustomControllerProvider`
+     * keys the routes of one provider by their **name** (`$this->routes[$routeName]`), so a
+     * `get('login', …)` next to a `post('login', …)` does not add a second route — it silently
+     * replaces the first. The core offers `match()` for precisely this case, a route without a
+     * method restriction, and the branch then happens here. Registering the mask on a mount of
+     * its own was the other way out and a worse one: a mount's own route carries the empty name,
+     * so the address would have become `/admin/login/` and the bare form would answer 405.
      *
-     * NO HTML, IN EITHER DIRECTION, and that is the seam to story 002-001-0003. This route exists
-     * so the authenticator can be exercised end to end against a running instance; the login
-     * screen, the Turbo-conformant submit and a readable rejection are that story's work. A
-     * rejection is therefore the core's status code and nothing else — 401 for wrong credentials,
-     * 429 plus `Retry-After` when the core's throttle has had enough.
+     * THE ORDER OF THE TWO CHECKS MATTERS. The form token is verified **before** the credentials
+     * ever reach the core. Checking it afterwards would let a forged post drive the core's login
+     * throttle, which is a way to lock a person out of their own admin without ever knowing
+     * their password.
      */
     public function loginAction(Request $request): Response
     {
@@ -111,27 +135,51 @@ final class AdminController
             return $refusal;
         }
 
+        /** @var LoginScreen $screen */
+        $screen = $this->app[LoginScreen::CONTAINER_KEY];
+
+        if (!$request->isMethod('POST')) {
+            return $screen->show($request);
+        }
+
+        $alias = (string) ($request->request->all()['alias'] ?? '');
+
+        if (!$screen->verifyToken($request)) {
+            return $screen->reject($request, self::MESSAGE_TOKEN, $alias);
+        }
+
         /** @var AdminAuthenticator $authenticator */
         $authenticator = $this->app[AdminAuthenticator::CONTAINER_KEY];
 
         $result = $authenticator->login(
             $request,
-            (string) ($request->request->all()['alias'] ?? ''),
+            $alias,
             (string) ($request->request->all()['pass'] ?? '')
         );
 
         if (!$result['ok']) {
-            $headers = $result['retryAfter'] !== null
-                ? array('Retry-After' => (string) $result['retryAfter'])
-                : array();
+            if ($result['retryAfter'] !== null) {
+                return $screen->reject(
+                    $request,
+                    sprintf(self::MESSAGE_THROTTLED, $result['retryAfter']),
+                    $alias,
+                    array('Retry-After' => (string) $result['retryAfter'])
+                );
+            }
 
-            return new Response('', $result['status'], $headers);
+            return $screen->reject($request, self::MESSAGE_CREDENTIALS, $alias);
         }
 
+        /*
+         * 303 AND NOT 302. After a POST, 303 is the code that tells every client to follow up
+         * with a GET; 302 leaves that to the client's goodwill. Turbo follows both, but the
+         * admin should not depend on which of the two a browser or a proxy decides to be
+         * generous about.
+         */
         $prefix = $this->app[AdminManager::CONTAINER_KEY]->getPrefix();
 
         return $authenticator->withSessionCookie(
-            new RedirectResponse($prefix.'/'),
+            new RedirectResponse($prefix.'/', 303),
             $request,
             $result['token']
         );
@@ -146,9 +194,9 @@ final class AdminController
      * mounted `isSecure = true` so that the core's guard has set `auth.token` by the time the
      * authenticator asks it to be dropped.
      *
-     * 204 AND NOT A REDIRECT, for now. The honest target would be the login screen, and that does
-     * not exist yet — it arrives with story 002-001-0003, which is where this turns into a
-     * redirect. Sending the browser to `/admin/` instead would answer 401 and call it a feature.
+     * THE REDIRECT GOES TO THE MASK, which is what story 002-001-0002 said it would once the
+     * mask existed. Sending the browser to `/admin/` instead would be a redirect into the
+     * rejection the mask was built to replace.
      */
     public function logoutAction(Request $request): Response
     {
@@ -159,7 +207,12 @@ final class AdminController
             return new Response('', 500);
         }
 
-        return $authenticator->withoutSessionCookie(new Response('', 204), $request);
+        $prefix = $this->app[AdminManager::CONTAINER_KEY]->getPrefix();
+
+        return $authenticator->withoutSessionCookie(
+            new RedirectResponse($prefix.'/login', 303),
+            $request
+        );
     }
 
     /**

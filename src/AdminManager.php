@@ -5,13 +5,17 @@ declare(strict_types=1);
 namespace Areanet\ContentflyAdmin;
 
 use Areanet\ContentflyAdmin\Auth\AdminAuthenticator;
+use Areanet\ContentflyAdmin\Auth\LoginScreen;
 use Areanet\ContentflyAdmin\Controller\AdminController;
 use Areanet\ContentflyAdmin\Command\PublishAssetsCommand;
 use Areanet\ContentflyAdmin\Controller\AssetController;
 use Areanet\ContentflyAdmin\Schema\SchemaClient;
 use Areanet\ContentflyAdmin\Schema\ShapingListener;
 use Areanet\ContentflyAdmin\Schema\VersionGuard;
+use Areanet\ContentflyAdmin\View\TemplateRenderer;
 use Areanet\PIM\Classes\Kernel\ApplicationInterface;
+use Symfony\Component\HttpFoundation\RedirectResponse;
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
 /**
  * The admin package's entry point into a Contentfly project.
@@ -113,6 +117,7 @@ final class AdminManager
         $this->registerServices();
         $this->mountRoutes();
         $this->registerAuthBridge();
+        $this->registerLoginRedirect();
         $this->registerCommands();
         $this->registerSchemaListener();
     }
@@ -143,6 +148,17 @@ final class AdminManager
         $this->app[AdminAuthenticator::CONTAINER_KEY] = static function ($app) use ($prefix): AdminAuthenticator {
             return new AdminAuthenticator($app, $prefix);
         };
+
+        $this->app[TemplateRenderer::CONTAINER_KEY] = static function (): TemplateRenderer {
+            return new TemplateRenderer();
+        };
+
+        $this->app[LoginScreen::CONTAINER_KEY] = static function ($app): LoginScreen {
+            return new LoginScreen(
+                $app[self::CONTAINER_KEY],
+                $app[TemplateRenderer::CONTAINER_KEY]
+            );
+        };
     }
 
     /**
@@ -166,6 +182,64 @@ final class AdminManager
         $this->app->before(static function ($request, $app): void {
             $app[AdminAuthenticator::CONTAINER_KEY]->applyTokenHeader($request);
         });
+    }
+
+    /**
+     * Turns the core's refusal of an unauthenticated admin request into the login mask.
+     *
+     * WHY AN ERROR HANDLER AND NOT THE `before` HOOK NEXT DOOR. The hook was the obvious place
+     * and is the wrong one, for two reasons that only show up when you look at what is mounted
+     * inside the prefix. First, the asset routes live on `$prefix.'/_asset'` — inside the admin's
+     * own scope — so a hook that redirected every unauthenticated request in scope would redirect
+     * the stylesheet and the ES modules of the very mask it was sending people to, and the mask
+     * would arrive naked. Second, a cookie that merely *exists* says nothing: the token in it
+     * expires, and `AdminAuthenticator::hasSession()` cannot tell a live session from a dead one
+     * without asking the core. An expired session would sail past the hook straight into the raw
+     * refusal. The exception, on the other hand, is thrown in exactly both cases and in no other,
+     * because `login` and the asset routes are mounted `isSecure = false` and never produce it.
+     *
+     * THE EXCEPTION CLASS IS THE TEST, NOT THE STATUS CODE. `AccessDeniedHttpException` reports
+     * HTTP **403**; the 401 the core means sits in the exception's *code* and is only read on its
+     * JSON path. A handler keyed on status 401 would never fire — and would look like a handler
+     * that works, because the raw refusal it failed to replace is what you saw before it existed.
+     *
+     * THE PRIORITY IS WHAT PUTS THIS IN FRONT. `Application::error()` defaults to `-8` and the
+     * core registers its own handler on that default; the first handler to set a response wins.
+     * Anything above `-8` therefore runs first, and returning `null` for everything that is not
+     * an admin access refusal hands those back to the core's handler untouched — including the
+     * debug page, which stays exactly as it was for every other error.
+     */
+    private function registerLoginRedirect(): void
+    {
+        $app    = $this->app;
+        $prefix = $this->prefix;
+
+        $this->app->error(static function (\Throwable $error, $request) use ($app, $prefix) {
+            if (!$error instanceof AccessDeniedHttpException) {
+                return null;
+            }
+
+            $path = $request->getPathInfo();
+
+            if ($path !== $prefix && !str_starts_with($path, $prefix.'/')) {
+                return null;
+            }
+
+            $response = new RedirectResponse($prefix.'/login');
+
+            /*
+             * A DEAD COOKIE IS CLEARED ON THE WAY OUT. It is the only thing that distinguishes
+             * "never signed in" from "session ran out", and leaving it in place means the browser
+             * keeps presenting a token the core has already rejected on every later request.
+             */
+            $authenticator = $app[AdminAuthenticator::CONTAINER_KEY];
+
+            if ($authenticator->hasSession($request)) {
+                return $authenticator->withoutSessionCookie($response, $request);
+            }
+
+            return $response;
+        }, 0);
     }
 
     /**
@@ -199,8 +273,15 @@ final class AdminManager
      * as `/admin/login` and `/admin/logout`. Mounting them separately would have been the other
      * way to get a second controller class, at the price of their paths: a mount's own route is
      * the empty name, so `/admin/login` would have become `/admin/login/`, with the bare form
-     * answering 405. The actions here stay thin on purpose — the work is in `AdminAuthenticator`,
-     * which is where ADR 0009 puts it.
+     * answering 405. The actions here stay thin on purpose — the work is in `AdminAuthenticator`
+     * and `LoginScreen`, which is where ADR 0009 and ADR 0010 put it.
+     *
+     * `login` IS `match()` AND HAS TO BE. It answers a GET with the mask and a POST with the
+     * result of submitting it, and those cannot be two registrations: keying by route name means
+     * a `get('login', …)` written next to a `post('login', …)` would not add a route, it would
+     * overwrite the one already there — silently, since nothing in the core objects. `match()` is
+     * the core's own answer for this, a route without a method restriction, and the branch then
+     * sits in `loginAction()`.
      *
      * THE SECOND ARGUMENT IS `isSecure`, and the three values are each deliberate. The index is
      * `true` as of story 002-001: until then `/admin/` was open to anyone who knew the path, and
@@ -215,7 +296,7 @@ final class AdminManager
         $this->app['routeManager']
             ->mount($this->prefix, AdminController::class)
             ->get('', true, 'indexAction')
-            ->post('login', false, 'loginAction')
+            ->match('login', false, 'loginAction')
             ->get('logout', true, 'logoutAction');
 
         /*
