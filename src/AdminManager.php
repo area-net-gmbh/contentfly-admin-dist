@@ -12,6 +12,7 @@ use Areanet\ContentflyAdmin\Controller\AssetController;
 use Areanet\ContentflyAdmin\Schema\SchemaClient;
 use Areanet\ContentflyAdmin\Schema\ShapingListener;
 use Areanet\ContentflyAdmin\Schema\VersionGuard;
+use Areanet\ContentflyAdmin\View\ColumnBuilder;
 use Areanet\ContentflyAdmin\View\MenuBuilder;
 use Areanet\ContentflyAdmin\View\TemplateRenderer;
 use Areanet\PIM\Classes\Kernel\ApplicationInterface;
@@ -163,6 +164,10 @@ final class AdminManager
 
         $this->app[MenuBuilder::CONTAINER_KEY] = static function ($app): MenuBuilder {
             return new MenuBuilder($app[self::CONTAINER_KEY]);
+        };
+
+        $this->app[ColumnBuilder::CONTAINER_KEY] = static function ($app): ColumnBuilder {
+            return new ColumnBuilder($app[SchemaClient::CONTAINER_KEY]);
         };
     }
 
