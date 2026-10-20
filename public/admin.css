@@ -6,11 +6,35 @@
  * stylesheet that visibly applies, so the delivery can be proven end to end.
  */
 
+/*
+ * THE BRANDING LAYER. Every colour of the admin is declared here and nowhere else, so a
+ * project can recolour the interface by redeclaring these properties — no copy of this file,
+ * no overridden template. Whether that is enough, or whether projects also need to replace
+ * whole templates, is decided at the pilot (story 006-003); until then this layer is the
+ * smaller of the two commitments and the one that does not have to be taken back.
+ *
+ * NAMED AFTER THEIR ROLE, NOT THEIR COLOUR. `--admin-danger-surface` keeps meaning what it
+ * means after somebody sets it to blue; `--admin-light-red` would not. The contract is in
+ * `an_project/docs/styleguide.md`.
+ */
 :root {
     --admin-text: #2f2f2f;
     --admin-background: #ffffff;
     --admin-accent: #3c80ac;
+    --admin-accent-contrast: #ffffff;
     --admin-rule: #ededed;
+
+    /* The error state of the mask — a surface, its text and the rule that marks it. */
+    --admin-danger: #b3261e;
+    --admin-danger-surface: #fdecea;
+    --admin-danger-text: #8c1d18;
+
+    /*
+     * How much darker an interactive surface gets on hover. A filter rather than a second
+     * colour, so that a project which only sets `--admin-accent` keeps a matching hover
+     * state instead of having to think of two values.
+     */
+    --admin-hover-dim: 0.94;
 }
 
 body {
@@ -122,9 +146,9 @@ li {
 .login__error {
     margin: 0 0 1.25rem;
     padding: 0.75rem 1rem;
-    border-left: 3px solid #b3261e;
-    background: #fdecea;
-    color: #8c1d18;
+    border-left: 3px solid var(--admin-danger);
+    background: var(--admin-danger-surface);
+    color: var(--admin-danger-text);
 }
 
 .login__form {
@@ -157,14 +181,14 @@ li {
     border: 0;
     border-radius: 3px;
     background: var(--admin-accent);
-    color: #ffffff;
+    color: var(--admin-accent-contrast);
     font: inherit;
     font-weight: 600;
     cursor: pointer;
 }
 
 .login__submit:hover {
-    filter: brightness(0.94);
+    filter: brightness(var(--admin-hover-dim));
 }
 
 .login__submit:focus-visible {
