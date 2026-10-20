@@ -8,8 +8,6 @@ use Areanet\ContentflyAdmin\AdminManager;
 use Areanet\ContentflyAdmin\Asset\Importmap;
 use Areanet\ContentflyAdmin\Auth\AdminAuthenticator;
 use Areanet\ContentflyAdmin\Auth\LoginScreen;
-use Areanet\ContentflyAdmin\Schema\CoreVersionMismatch;
-use Areanet\ContentflyAdmin\Schema\VersionGuard;
 use Areanet\ContentflyAdmin\View\MenuBuilder;
 use Areanet\ContentflyAdmin\View\TemplateRenderer;
 use Symfony\Component\HttpFoundation\RedirectResponse;
@@ -38,6 +36,8 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class AdminController
 {
+    use GuardsCoreVersion;
+
     /** Wrong alias or password — deliberately not saying which of the two. */
     private const MESSAGE_CREDENTIALS = 'Benutzername oder Passwort ist falsch.';
 
@@ -192,38 +192,5 @@ final class AdminController
             new RedirectResponse($prefix.'/login', 303),
             $request
         );
-    }
-
-    /**
-     * Runs the version check and turns a refusal into the response the browser gets.
-     *
-     * Returns `null` when the admin may proceed, so every entry point added later is one `if`
-     * away from being guarded too.
-     *
-     * HTTP 500 AND NOT 503: a package that does not fit the core it is installed next to is a
-     * deployment mistake, not a temporary condition, and 503 invites a client to retry something
-     * that will not change by itself.
-     *
-     * The message is shown rather than only logged. It names both versions and the expected
-     * range, which is the whole point — whoever opens the admin and sees this needs no second
-     * step to resolve it. It discloses the two package versions involved and nothing else: no
-     * paths, no configuration, no data.
-     */
-    private function guard(): ?Response
-    {
-        try {
-            $this->app[VersionGuard::CONTAINER_KEY]->check();
-        } catch (CoreVersionMismatch $mismatch) {
-            $message = htmlspecialchars($mismatch->getMessage(), ENT_QUOTES, 'UTF-8');
-
-            $html = '<!doctype html>'
-                .'<html lang="en"><head><meta charset="utf-8">'
-                .'<title>Contentfly Admin — version mismatch</title></head>'
-                .'<body><h1>Contentfly Admin cannot start</h1><p>'.$message.'</p></body></html>';
-
-            return new Response($html, 500, array('Content-Type' => 'text/html; charset=UTF-8'));
-        }
-
-        return null;
     }
 }

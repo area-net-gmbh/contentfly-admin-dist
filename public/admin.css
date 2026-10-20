@@ -195,3 +195,42 @@ li {
     outline: 2px solid var(--admin-text);
     outline-offset: 2px;
 }
+
+/*
+ * THE LIST VIEW (story 002-003).
+ *
+ * The table is allowed to be wider than the page and scrolls on its own rather than squeezing
+ * the columns: the stage-1 fallback picks up to five fields without knowing how wide their
+ * values are, so there is no column width here that would be right for every entity.
+ *
+ * A LONG VALUE IS CLIPPED, NOT SHORTENED. The concept accepts long text in the list, and
+ * `ListController::cell()` therefore hands the full value over — cutting it in PHP would lose
+ * it for everyone. The cell caps its width and ends in an ellipsis instead, so one `textarea`
+ * cannot push the remaining columns off the screen.
+ */
+.admin-list {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9375rem;
+}
+
+.admin-list__head {
+    padding: 0.5rem 0.75rem;
+    border-bottom: 2px solid var(--admin-accent);
+    text-align: left;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.admin-list__row:hover {
+    background: var(--admin-rule);
+}
+
+.admin-list__cell {
+    max-width: 24rem;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--admin-rule);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

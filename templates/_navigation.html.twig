@@ -10,8 +10,11 @@
     story 002-003 needs (ADR 0011), and a rule split between a template and a class is a rule
     that drifts.
 
-    THE LINKS LEAD NOWHERE UNTIL STORY 002-003 mounts the list route — that is known and
-    accepted, so that 002-003 only adds the route instead of touching the menu a second time.
+    THE LINKS LEAD TO THE LIST VIEW since story 002-003. They were dead until then, on the
+    assumption that mounting the route would be all it took. It was not: the list lives under
+    `/<prefix>/list/<Entity>` and not directly under the prefix (ADR 0012), so `MenuBuilder`
+    was adjusted with it. The mapping still lives there and not here, which is what kept that
+    to a one-line change.
 #}
 <nav class="admin-nav" aria-label="Hauptmenü">
     <ul class="admin-nav__list">

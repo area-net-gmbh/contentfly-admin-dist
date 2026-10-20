@@ -66,7 +66,7 @@ final class MenuBuilder
             $items[] = array(
                 'entity' => $entity,
                 'label'  => $entity,
-                'url'    => $this->manager->getPrefix().'/'.self::entityToUrl($entity),
+                'url'    => $this->manager->getPrefix().'/list/'.self::entityToUrl($entity),
             );
         }
 

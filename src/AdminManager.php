@@ -9,6 +9,7 @@ use Areanet\ContentflyAdmin\Auth\LoginScreen;
 use Areanet\ContentflyAdmin\Controller\AdminController;
 use Areanet\ContentflyAdmin\Command\PublishAssetsCommand;
 use Areanet\ContentflyAdmin\Controller\AssetController;
+use Areanet\ContentflyAdmin\Controller\ListController;
 use Areanet\ContentflyAdmin\Schema\SchemaClient;
 use Areanet\ContentflyAdmin\Schema\ShapingListener;
 use Areanet\ContentflyAdmin\Schema\VersionGuard;
@@ -327,6 +328,20 @@ final class AdminManager
          * `false` is the `isSecure` flag — assets are served without a login on purpose, see
          * `AssetController`.
          */
+        /*
+         * THE LIST GETS A MOUNT OF ITS OWN, for the same reason the assets do — one mount binds
+         * one controller class. Why the address is `/<prefix>/list/<Entity>` and not
+         * `/<prefix>/<Entity>` is ADR 0012: the prefix already carries `login` and `logout`, and
+         * extension stage 3a will put project pages beside them. A flat entity namespace would
+         * have those compete with entity names, and the loser is whichever was registered second.
+         *
+         * `isSecure = true`: the list reads records, and `Api::getList()` asks
+         * `Permission::isReadable()` about `auth.user`, which only a guarded request sets.
+         */
+        $this->app['routeManager']
+            ->mount($this->prefix.'/list', ListController::class)
+            ->get('{entity}', true, 'listAction');
+
         $this->app['routeManager']
             ->mount($this->prefix.'/_asset', AssetController::class)
             ->get('{version}/{file}', false, 'serveAction')
