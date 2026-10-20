@@ -10,6 +10,7 @@ use Areanet\ContentflyAdmin\Auth\AdminAuthenticator;
 use Areanet\ContentflyAdmin\Auth\LoginScreen;
 use Areanet\ContentflyAdmin\Schema\CoreVersionMismatch;
 use Areanet\ContentflyAdmin\Schema\VersionGuard;
+use Areanet\ContentflyAdmin\View\TemplateRenderer;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -23,13 +24,13 @@ use Symfony\Component\HttpFoundation\Response;
  * signature — `CustomControllerProvider::connect()` builds every controller as
  * `new $controllerName($app)`, so that shape is fixed from the outside.
  *
- * WHAT THIS IS NOT YET: a user interface for working. Signing in is now a page a person can
- * use, but the index behind it is still the proof that the mount and the asset path work —
- * layout, navigation and the menu from the schema are story 002-002. That is also why the
- * index page is still built by concatenating strings while the login mask is a Twig template:
- * the mask is new and takes input, the index page is an existing proof artifact that 002-002
- * replaces wholesale. One rendering path is leftover and has a named successor, which is
- * better than rewriting a proof in passing (ADR 0010).
+ * EVERY PAGE GOES THROUGH TWIG AND THE SHARED LAYOUT since 002-002-0003. The last string
+ * concatenation — the index page, a proof artifact from story 001-007 — is gone, which is what
+ * ADR 0010 deferred to this story rather than doing in passing.
+ *
+ * WHAT THIS IS NOT YET: a user interface for working. There is a page, a title and the
+ * entities of the schema, but nothing to open yet — list, form and the menu that links to them
+ * are stories 002-002-0002 and 002-003 onwards.
  *
  * THE ACTIONS STAY THIN. What decides anything lives next door: the session mechanics in
  * `AdminAuthenticator` (ADR 0009), the mask and its form token in `LoginScreen`.
@@ -59,6 +60,15 @@ final class AdminController
      * The action name is given explicitly when the route is registered. It has to be: the
      * core derives a missing action from the route name, and this route's name is the empty
      * string — which is what puts the page on the mount path itself.
+     *
+     * THE FOUR LAYOUT VARIABLES ARE ASSEMBLED HERE, like `LoginScreen` does for the mask.
+     * `layout.html.twig` requires `title`, `stylesheet` and `importmap` in every render
+     * context and fails loudly on a missing one (`strict_variables`); `controllers` is the
+     * optional declaration that makes the layout load Stimulus and register `hello`.
+     *
+     * THE ENTITIES COME FROM THE MANAGER AND NOT FROM THE SCHEMA CLIENT, so the project's
+     * `entities` whitelist is applied — and so the page and a later menu cannot disagree about
+     * what the admin administers.
      */
     public function indexAction(): Response
     {
@@ -68,47 +78,13 @@ final class AdminController
 
         $manager = $this->app[AdminManager::CONTAINER_KEY];
 
-        $items = '';
-        foreach ($manager->getEntities() as $entity) {
-            $items .= '<li>'.htmlspecialchars($entity, ENT_QUOTES, 'UTF-8').'</li>';
-        }
-
-        $title = htmlspecialchars($manager->getTitle(), ENT_QUOTES, 'UTF-8');
-
-        /*
-         * THE PAGE IS STILL NOT A USER INTERFACE — it now also proves the asset path.
-         *
-         * Stylesheet, import map and the module below are what turns story 001-007 from "files
-         * are reachable by URL" into "the browser actually loads and runs them". A stylesheet
-         * that 404s looks exactly like one that was never linked, so the proof has to happen in
-         * a page, not only in a `curl` call.
-         *
-         * `data-controller="hello"` is the hook Stimulus looks for; the controller sets
-         * `data-admin-assets-ready` on connect, which is a state a check can read without a
-         * human looking at the screen.
-         *
-         * TURBO IS IMPORTED FOR ITS SIDE EFFECT. The vendored ES module calls `start()` at top
-         * level, so the bare import is the whole wiring. It belongs on this page and not only
-         * on the login mask: without it the redirect a successful sign-in sends the browser to
-         * would arrive as an ordinary page load, and the Turbo-conformant submit would be
-         * provable only on the way in, never on the way through.
-         */
-        $assets = '<link rel="stylesheet" href="'
-            .htmlspecialchars($manager->assetUrl('admin.css'), ENT_QUOTES, 'UTF-8')
-            .'">'
-            .Importmap::scriptTag($manager)
-            .'<script type="module">'
-            ."import '@hotwired/turbo';"
-            ."import { Application } from '@hotwired/stimulus';"
-            ."import HelloController from 'admin/hello';"
-            .'Application.start().register(\'hello\', HelloController);'
-            .'</script>';
-
-        $html = '<!doctype html>'
-            .'<html lang="de"><head><meta charset="utf-8"><title>'.$title.'</title>'
-            .$assets
-            .'</head>'
-            .'<body data-controller="hello"><h1>'.$title.'</h1><ul>'.$items.'</ul></body></html>';
+        $html = $this->app[TemplateRenderer::CONTAINER_KEY]->render('index.html.twig', array(
+            'title'       => $manager->getTitle(),
+            'stylesheet'  => $manager->assetUrl('admin.css'),
+            'importmap'   => Importmap::scriptTag($manager),
+            'controllers' => array('hello' => 'admin/hello'),
+            'entities'    => $manager->getEntities(),
+        ));
 
         return new Response($html, 200, array('Content-Type' => 'text/html; charset=UTF-8'));
     }

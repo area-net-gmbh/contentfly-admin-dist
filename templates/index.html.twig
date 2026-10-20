@@ -1,0 +1,33 @@
+{#
+    The admin's entry page.
+
+    WHAT IT REPLACED. Until 002-002-0003 this page was assembled by concatenating strings in
+    `AdminController::indexAction()` — a proof artifact from story 001-007 whose job was to show
+    that the mount and the asset path work, not to be a user interface. ADR 0010 left it that way
+    on purpose and named this task as its successor, because rewriting a proof in passing is how
+    a proof quietly stops proving anything.
+
+    THE ENTITY LIST HERE IS A WAYPOINT. `002-002-0002` replaces it with the menu from the
+    `MenuBuilder`, which brings the links along. It is rendered here and not left out because
+    `tools/harness-admin-pruefen.php` requires every entity name of the schema to appear in the
+    body — that is the check which proves the schema really reaches the page, and it has to hold
+    at every step, not only at the end of the story.
+
+    IT DECLARES THE `hello` CONTROLLER, and that is the one place in the package where the
+    layout's Stimulus registration actually runs. The controller sets `data-admin-assets-ready`
+    when it connects, which is a state a check can read without a person looking at the screen.
+#}{% extends 'layout.html.twig' %}
+
+{% block bodyAttributes %} class="admin" data-controller="hello"{% endblock %}
+
+{% block content %}
+<main class="admin__main">
+    <h1>{{ title }}</h1>
+
+    <ul class="admin__entities">
+{% for entity in entities %}
+        <li>{{ entity }}</li>
+{% endfor %}
+    </ul>
+</main>
+{% endblock %}
