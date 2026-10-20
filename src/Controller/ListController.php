@@ -96,16 +96,19 @@ final class ListController
         }
 
         $columns = $this->app[ColumnBuilder::CONTAINER_KEY]->build($name);
+        $sort      = self::sortProperty($request, $columns);
+        $direction = self::direction($request);
+        $page      = self::page($request);
 
         $result = (new Api($this->app, $request))->getList(
             $name,
             null,
-            null,
+            $sort === null ? null : array($sort => $direction),
             null,
             array_column($columns, 'property'),
             null,
             false,
-            1,
+            $page,
             self::ITEMS_PER_PAGE,
             $language
         );
@@ -117,6 +120,22 @@ final class ListController
          * caller downstream would otherwise have to know about a special case that says nothing.
          */
         $records = is_array($result) ? ($result['objects'] ?? array()) : array();
+        $total   = is_array($result) ? (int) ($result['totalObjects'] ?? 0) : 0;
+
+        /*
+         * THE PAGE IS CLAMPED THE WAY THE CORE CLAMPS IT. `getList()` quietly moves a request
+         * past the end back onto the last page (`Api.php:1503-1505`) and does not say that it
+         * did, so a navigation that printed the requested number would label the last page `99`.
+         * The same arithmetic here keeps what is shown and what is said about it in step.
+         */
+        $pages = max(1, (int) ceil($total / self::ITEMS_PER_PAGE));
+        $page  = min($page, $pages);
+
+        $base  = $manager->getPrefix().'/list/'.MenuBuilder::entityToUrl($name);
+        $query = array('lang' => Language::normalise($request->query->get('lang')));
+
+        /* `dir` only says something next to a `sort`; on its own it would be noise in the URL. */
+        $order = $query + array('sort' => $sort, 'dir' => $sort === null ? null : strtolower($direction));
 
         $html = $this->app[TemplateRenderer::CONTAINER_KEY]->render('list.html.twig', array(
             'title'      => $name.' — '.$manager->getTitle(),
@@ -125,8 +144,15 @@ final class ListController
             'menu'       => $this->app[MenuBuilder::CONTAINER_KEY]->build(),
             'logoutUrl'  => $manager->getPrefix().'/logout',
             'entity'     => $name,
-            'columns'    => $columns,
+            'columns'    => self::sortableColumns($columns, $base, $query, $sort, $direction, $page),
             'rows'       => self::rows($records, $columns),
+            'pagination' => array(
+                'page'    => $page,
+                'pages'   => $pages,
+                'total'   => $total,
+                'prevUrl' => $page > 1 ? self::url($base, $order + array('page' => $page - 1)) : null,
+                'nextUrl' => $page < $pages ? self::url($base, $order + array('page' => $page + 1)) : null,
+            ),
         ));
 
         return new Response($html, 200, array('Content-Type' => 'text/html; charset=UTF-8'));
@@ -157,6 +183,110 @@ final class ListController
         $configured = Language::configured();
 
         return $configured[0] ?? null;
+    }
+
+    /**
+     * The property the list is sorted by, or `null` for the core's own default.
+     *
+     * ONLY A COLUMN OF THIS LIST IS ACCEPTED, and that is not politeness towards the user.
+     * `Api::getList()` puts the field name into DQL and guards it with `assertProperty()`,
+     * which *throws* on an unknown one (`Api.php:1520`) — a deliberate choice there, because a
+     * silently dropped sort order is a wrong answer to an API call. Here it would mean that a
+     * hand-edited URL answers with an error page instead of a list, so the value is checked
+     * against what this page actually offers and anything else falls back to the default.
+     *
+     * @param list<array{property: string, label: string}> $columns
+     */
+    private static function sortProperty(Request $request, array $columns): ?string
+    {
+        $requested = $request->query->get('sort');
+
+        if (!is_string($requested) || $requested === '') {
+            return null;
+        }
+
+        return in_array($requested, array_column($columns, 'property'), true) ? $requested : null;
+    }
+
+    /**
+     * `ASC` or `DESC` — anything else is `ASC`.
+     *
+     * The core rejects a direction it does not know with a 400, so the same reasoning as for the
+     * property applies: a mistyped URL should still produce a list.
+     */
+    private static function direction(Request $request): string
+    {
+        return strtolower((string) $request->query->get('dir')) === 'desc' ? 'DESC' : 'ASC';
+    }
+
+    /**
+     * The 1-based page number.
+     *
+     * NEVER ZERO, AND THAT IS THE IMPORTANT PART. `Api::getList()` applies its limit inside
+     * `if($currentPage)` (`Api.php:1507`), so page `0` does not mean "the first page" — it means
+     * no limit at all and the whole table in one response. A non-numeric or negative value in
+     * the URL therefore has to land on 1, not on 0.
+     */
+    private static function page(Request $request): int
+    {
+        $requested = $request->query->get('page');
+
+        return is_numeric($requested) ? max(1, (int) $requested) : 1;
+    }
+
+    /**
+     * The columns with what the table head needs to render them as sort controls.
+     *
+     * A CLICK ON THE ACTIVE COLUMN TURNS THE DIRECTION AROUND, a click on any other sorts it
+     * ascending — the behaviour every table has, so nothing has to be learned here.
+     *
+     * THE PAGE TRAVELS WITH THE SORT. Re-sorting does not send the reader back to page one;
+     * every parameter of the view survives every other one, which is what makes any state of
+     * this list a link that can be sent to somebody.
+     *
+     * @param list<array{property: string, label: string}> $columns
+     * @param array<string,string|null>                    $query
+     *
+     * @return list<array{property: string, label: string, url: string, ariaSort: string}>
+     */
+    private static function sortableColumns(array $columns, string $base, array $query, ?string $sort, string $direction, int $page): array
+    {
+        $sortable = array();
+
+        foreach ($columns as $column) {
+            $active = $column['property'] === $sort;
+
+            $sortable[] = array(
+                'property' => $column['property'],
+                'label'    => $column['label'],
+                'url'      => self::url($base, $query + array(
+                    'sort' => $column['property'],
+                    'dir'  => $active && $direction === 'ASC' ? 'desc' : 'asc',
+                    'page' => $page,
+                )),
+                'ariaSort' => $active ? ($direction === 'ASC' ? 'ascending' : 'descending') : 'none',
+            );
+        }
+
+        return $sortable;
+    }
+
+    /**
+     * One address of this list, with the empty parameters left out.
+     *
+     * Dropping `null` keeps the default view at its bare address instead of
+     * `?sort=&dir=asc&page=1`, which matters because that bare address is what the menu links
+     * to — two addresses for one page would split the browser history for no reason.
+     *
+     * @param array<string,string|int|null> $params
+     */
+    private static function url(string $base, array $params): string
+    {
+        $params = array_filter($params, static function ($value): bool {
+            return $value !== null && $value !== '';
+        });
+
+        return $params === array() ? $base : $base.'?'.http_build_query($params);
     }
 
     /**

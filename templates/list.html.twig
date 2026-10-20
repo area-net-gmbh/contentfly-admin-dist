@@ -9,8 +9,14 @@
     `rows` IS KEYED BY PROPERTY, so the header and the body walk the same `columns` list and
     cannot drift apart. A column added to `ColumnBuilder` needs no change here.
 
-    NO SORTING OR PAGINATION YET — story 002-003-0003 adds both, and the table is built as a
-    plain one so that it has somewhere to put them.
+    SORTING AND PAGING ARE PLAIN LINKS (002-003-0003). Turbo is already running — the layout's
+    bare import starts it — and it intercepts same-origin links by itself, so a sort or a page
+    change is a Turbo visit without a line of JavaScript here. The state travels in the URL,
+    which is what makes any view of this list something that can be bookmarked or sent on.
+
+    THE ADDRESSES ARE BUILT IN PHP, not here. `ListController` hands each column its `url` and
+    its `ariaSort` ready-made, because assembling query strings in Twig means re-deciding in
+    the template which parameters exist — and the controller is where they are read.
 #}{% extends 'layout.html.twig' %}
 
 {% block bodyAttributes %} class="admin"{% endblock %}
@@ -26,7 +32,9 @@
         <thead>
             <tr>
 {% for column in columns %}
-                <th scope="col" class="admin-list__head">{{ column.label }}</th>
+                <th scope="col" class="admin-list__head" aria-sort="{{ column.ariaSort }}">
+                    <a class="admin-list__sort admin-list__sort--{{ column.ariaSort }}" href="{{ column.url }}">{{ column.label }}</a>
+                </th>
 {% endfor %}
             </tr>
         </thead>
@@ -40,6 +48,20 @@
 {% endfor %}
         </tbody>
     </table>
+
+    <nav class="admin-pager" aria-label="Seitennavigation">
+{% if pagination.prevUrl %}
+        <a class="admin-pager__step" href="{{ pagination.prevUrl }}" rel="prev">Zurück</a>
+{% else %}
+        <span class="admin-pager__step admin-pager__step--off" aria-disabled="true">Zurück</span>
+{% endif %}
+        <span class="admin-pager__state">Seite {{ pagination.page }} von {{ pagination.pages }} · {{ pagination.total }} Datensätze</span>
+{% if pagination.nextUrl %}
+        <a class="admin-pager__step" href="{{ pagination.nextUrl }}" rel="next">Weiter</a>
+{% else %}
+        <span class="admin-pager__step admin-pager__step--off" aria-disabled="true">Weiter</span>
+{% endif %}
+    </nav>
 {% endif %}
 </main>
 {% endblock %}

@@ -24,6 +24,9 @@
     --admin-accent-contrast: #ffffff;
     --admin-rule: #ededed;
 
+    /* Text that is present but not actionable — a disabled control, a secondary note. */
+    --admin-muted: #6b6b6b;
+
     /* The error state of the mask — a surface, its text and the rule that marks it. */
     --admin-danger: #b3261e;
     --admin-danger-surface: #fdecea;
@@ -233,4 +236,76 @@ li {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+/*
+ * SORT CONTROLS AND PAGER (story 002-003-0003).
+ *
+ * The direction marker is a pseudo-element rather than an icon file or a character in the
+ * template: it belongs to the state, and `aria-sort` on the `th` already carries that state
+ * for anyone not looking at the screen. One source, two renderings.
+ */
+.admin-list__sort {
+    color: inherit;
+    text-decoration: none;
+}
+
+.admin-list__sort:hover {
+    text-decoration: underline;
+}
+
+.admin-list__sort:focus-visible {
+    outline: 2px solid var(--admin-accent);
+    outline-offset: 2px;
+}
+
+.admin-list__sort--ascending::after {
+    content: " \2191";
+    color: var(--admin-accent);
+}
+
+.admin-list__sort--descending::after {
+    content: " \2193";
+    color: var(--admin-accent);
+}
+
+.admin-pager {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    margin-top: 1rem;
+    font-size: 0.9375rem;
+}
+
+.admin-pager__step {
+    padding: 0.25rem 0.75rem;
+    border: 1px solid var(--admin-rule);
+    border-radius: 0.25rem;
+    color: var(--admin-accent);
+    text-decoration: none;
+}
+
+.admin-pager__step:hover {
+    filter: brightness(var(--admin-hover-dim));
+    background: var(--admin-rule);
+}
+
+.admin-pager__step:focus-visible {
+    outline: 2px solid var(--admin-accent);
+    outline-offset: 2px;
+}
+
+/*
+ * The inactive step keeps its box so the pager does not jump between the first and a middle
+ * page; only the colour says that there is nothing to click.
+ */
+.admin-pager__step--off {
+    padding: 0.25rem 0.75rem;
+    border: 1px solid var(--admin-rule);
+    border-radius: 0.25rem;
+    color: var(--admin-muted);
+}
+
+.admin-pager__state {
+    color: var(--admin-muted);
 }
