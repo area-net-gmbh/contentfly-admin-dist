@@ -1,0 +1,24 @@
+{#
+    The main menu, one entry per entity of the schema.
+
+    IT IS INCLUDED FROM THE LAYOUT'S `nav` BLOCK, not from a single page, so every view of
+    epic 002 gets the navigation without bringing it along. A page that must not show it — the
+    sign-in mask — simply leaves that block unfilled.
+
+    THE ITEMS COME READY-MADE from `View\MenuBuilder::build()`: label, entity name and URL are
+    decided there, because the mapping from an entity name to a URL segment has an inverse that
+    story 002-003 needs (ADR 0011), and a rule split between a template and a class is a rule
+    that drifts.
+
+    THE LINKS LEAD NOWHERE UNTIL STORY 002-003 mounts the list route — that is known and
+    accepted, so that 002-003 only adds the route instead of touching the menu a second time.
+#}
+<nav class="admin-nav" aria-label="Hauptmenü">
+    <ul class="admin-nav__list">
+{% for item in menu %}
+        <li class="admin-nav__item"><a class="admin-nav__link" href="{{ item.url }}">{{ item.label }}</a></li>
+{% endfor %}
+    </ul>
+
+    <a class="admin-nav__logout" href="{{ logoutUrl }}">Abmelden</a>
+</nav>

@@ -42,6 +42,54 @@ li {
 }
 
 /*
+ * The main menu (002-002-0002).
+ *
+ * Scoped to `.admin-nav*` for the same reason the mask is scoped to `.login*`: the views of
+ * epic 002 are still to come, and a rule on a bare `nav` or `a` would reach into all of them.
+ * The entity links lead nowhere until story 002-003 mounts the list route.
+ */
+
+.admin-nav {
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--admin-rule);
+}
+
+.admin-nav__list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1.25rem;
+    margin-bottom: 0.75rem;
+}
+
+/* The proof page's `li` rule drew a rule under every item; a menu does not want one. */
+.admin-nav__item {
+    padding: 0;
+    border-bottom: 0;
+}
+
+.admin-nav__link,
+.admin-nav__logout {
+    color: var(--admin-accent);
+    text-decoration: none;
+}
+
+.admin-nav__link:hover,
+.admin-nav__logout:hover {
+    text-decoration: underline;
+}
+
+.admin-nav__link:focus-visible,
+.admin-nav__logout:focus-visible {
+    outline: 2px solid var(--admin-accent);
+    outline-offset: 2px;
+}
+
+.admin-nav__logout {
+    font-size: 0.875rem;
+}
+
+/*
  * The sign-in mask (002-001-0003).
  *
  * The first styles in this file that exist for a person rather than for a proof. They are

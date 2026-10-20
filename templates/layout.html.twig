@@ -35,6 +35,11 @@
     the element early, and these strings come from calling code, not from this file.
     `JSON_UNESCAPED_SLASHES` only keeps the specifiers readable in the page source.
 
+    THE NAVIGATION RENDERS ITSELF AS SOON AS A PAGE HANDS OVER A `menu`, and then `logoutUrl`
+    belongs with it — the two travel together or not at all. A page that must not show a menu,
+    the sign-in mask, simply passes neither. `only` keeps the partial's context to those two, so
+    what it needs is visible at the call and not inherited by accident.
+
     NO ADDRESS IS WRITTEN HERE. The prefix belongs to the project and the asset version to the
     package; `AdminManager::assetUrl()` and `getPrefix()` are the only places that know how the
     two become one.
@@ -65,7 +70,11 @@
 {% block head %}{% endblock %}
 </head>
 <body{% block bodyAttributes %}{% endblock %}>
-{% block nav %}{% endblock %}
+{% block nav %}
+{% if menu|default([]) is not empty %}
+{% include '_navigation.html.twig' with {menu: menu, logoutUrl: logoutUrl} only %}
+{% endif %}
+{% endblock %}
 {% block content %}{% endblock %}
 </body>
 </html>

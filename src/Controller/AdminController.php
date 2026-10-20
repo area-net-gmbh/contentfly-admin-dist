@@ -10,6 +10,7 @@ use Areanet\ContentflyAdmin\Auth\AdminAuthenticator;
 use Areanet\ContentflyAdmin\Auth\LoginScreen;
 use Areanet\ContentflyAdmin\Schema\CoreVersionMismatch;
 use Areanet\ContentflyAdmin\Schema\VersionGuard;
+use Areanet\ContentflyAdmin\View\MenuBuilder;
 use Areanet\ContentflyAdmin\View\TemplateRenderer;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -66,9 +67,10 @@ final class AdminController
      * context and fails loudly on a missing one (`strict_variables`); `controllers` is the
      * optional declaration that makes the layout load Stimulus and register `hello`.
      *
-     * THE ENTITIES COME FROM THE MANAGER AND NOT FROM THE SCHEMA CLIENT, so the project's
-     * `entities` whitelist is applied — and so the page and a later menu cannot disagree about
-     * what the admin administers.
+     * THE MENU IS THE `MenuBuilder`'S, and handing it over is what makes the layout render the
+     * navigation at all. `logoutUrl` travels with it, because a menu without a way out is not
+     * one. The builder resolves the project's `entities` whitelist through the manager, so
+     * there is exactly one answer in the package to what the admin administers.
      */
     public function indexAction(): Response
     {
@@ -83,7 +85,8 @@ final class AdminController
             'stylesheet'  => $manager->assetUrl('admin.css'),
             'importmap'   => Importmap::scriptTag($manager),
             'controllers' => array('hello' => 'admin/hello'),
-            'entities'    => $manager->getEntities(),
+            'menu'        => $this->app[MenuBuilder::CONTAINER_KEY]->build(),
+            'logoutUrl'   => $manager->getPrefix().'/logout',
         ));
 
         return new Response($html, 200, array('Content-Type' => 'text/html; charset=UTF-8'));

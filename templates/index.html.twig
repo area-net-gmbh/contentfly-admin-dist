@@ -7,11 +7,10 @@
     on purpose and named this task as its successor, because rewriting a proof in passing is how
     a proof quietly stops proving anything.
 
-    THE ENTITY LIST HERE IS A WAYPOINT. `002-002-0002` replaces it with the menu from the
-    `MenuBuilder`, which brings the links along. It is rendered here and not left out because
-    `tools/harness-admin-pruefen.php` requires every entity name of the schema to appear in the
-    body — that is the check which proves the schema really reaches the page, and it has to hold
-    at every step, not only at the end of the story.
+    THE ENTITIES ARE IN THE MENU, NOT ON THE PAGE, since 002-002-0002. The layout renders the
+    navigation as soon as this action hands over a `menu`, which is also what keeps
+    `tools/harness-admin-pruefen.php` green — it requires every entity name of the schema to
+    appear in the body, and the menu labels are those names.
 
     IT DECLARES THE `hello` CONTROLLER, and that is the one place in the package where the
     layout's Stimulus registration actually runs. The controller sets `data-admin-assets-ready`
@@ -24,10 +23,6 @@
 <main class="admin__main">
     <h1>{{ title }}</h1>
 
-    <ul class="admin__entities">
-{% for entity in entities %}
-        <li>{{ entity }}</li>
-{% endfor %}
-    </ul>
+    <p class="admin__hint">Wählen Sie links eine Entität, um ihre Datensätze zu bearbeiten.</p>
 </main>
 {% endblock %}
