@@ -1,0 +1,71 @@
+{#
+    The page skeleton every admin view extends.
+
+    WHY IT EXISTS. Until story 002-002 the package rendered on two paths — the sign-in mask as a
+    full Twig document, the index page as a concatenated string — and each carried its own
+    doctype, stylesheet link, import map and Turbo import. Every further view of epic 002 would
+    have been one more copy of the same five lines, and the first one to drift would have been
+    the one nobody looked at.
+
+    THREE VARIABLES ARE REQUIRED IN EVERY RENDER CONTEXT: `title`, `stylesheet`, `importmap`.
+    `strict_variables` is on (`View\TemplateRenderer`), so a caller that forgets one gets a hard
+    error instead of a page that quietly arrives without its styles — and a naked page looks
+    exactly like a working one. There is no default here that would be correct. Each caller
+    still assembles those three itself; a shared builder for them earns its keep once there are
+    more views than can be counted on one hand, and not before.
+
+    `importmap` IS PRINTED RAW, AND THAT IS SAFE. It is a finished `<script type="importmap">`
+    element from `Asset\Importmap::scriptTag()`, JSON-encoded with `JSON_HEX_TAG`, so nothing a
+    project writes into its prefix can close the element early. Escaping it here would print the
+    markup instead of applying it.
+
+    IMPORTING TURBO STARTS IT. The vendored module calls `start()` at top level, so the bare
+    import is the whole wiring — every page below this layout gets Turbo navigation and
+    Turbo-conformant form submits without doing anything for it.
+
+    STIMULUS IS LOADED ONLY WHERE IT IS USED. A view declares what it needs in the optional
+    `controllers` variable, a map of `{identifier: module specifier}`; the block below then calls
+    `Application.start()` exactly once and registers them. A view that declares nothing — the
+    sign-in mask — never loads the library at all. The specifiers are resolved through the import
+    map, which is why they are bare names and not URLs. `block modules` is the way out for page
+    script that is not a Stimulus controller.
+
+    BOTH VALUES GO THROUGH `json_encode` WITH `JSON_HEX_TAG`, the same flag `Importmap` uses and
+    for the same reason: an identifier or specifier containing `</script>` would otherwise end
+    the element early, and these strings come from calling code, not from this file.
+    `JSON_UNESCAPED_SLASHES` only keeps the specifiers readable in the page source.
+
+    NO ADDRESS IS WRITTEN HERE. The prefix belongs to the project and the asset version to the
+    package; `AdminManager::assetUrl()` and `getPrefix()` are the only places that know how the
+    two become one.
+#}<!doctype html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}{{ title }}{% endblock %}</title>
+    <link rel="stylesheet" href="{{ stylesheet }}">
+    {{ importmap|raw }}
+{% set pageControllers = controllers|default({}) %}
+    <script type="module">
+        import '@hotwired/turbo';
+{% if pageControllers is not empty %}
+        import { Application } from '@hotwired/stimulus';
+
+        const application = Application.start();
+{% for identifier, specifier in pageControllers %}
+        application.register(
+            {{ identifier|json_encode(constant('JSON_HEX_TAG') b-or constant('JSON_UNESCAPED_SLASHES'))|raw }},
+            (await import({{ specifier|json_encode(constant('JSON_HEX_TAG') b-or constant('JSON_UNESCAPED_SLASHES'))|raw }})).default
+        );
+{% endfor %}
+{% endif %}
+{% block modules %}{% endblock %}
+    </script>
+{% block head %}{% endblock %}
+</head>
+<body{% block bodyAttributes %}{% endblock %}>
+{% block nav %}{% endblock %}
+{% block content %}{% endblock %}
+</body>
+</html>

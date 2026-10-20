@@ -6,26 +6,22 @@
     assembled from a core response. One forgotten `htmlspecialchars()` in a string version
     would be an injection point that looks like working markup.
 
-    `importmap` IS THE ONE EXCEPTION AND IS SAFE. It is a finished `<script type="importmap">`
-    element built by `Importmap::scriptTag()`, which JSON-encodes with `JSON_HEX_TAG` so that
-    nothing a project puts in its prefix can close the element early. Escaping it here would
-    print the markup instead of applying it.
+    THE DOCUMENT AROUND IT COMES FROM `layout.html.twig` — doctype, head, stylesheet, import map
+    and the Turbo import all live there since 002-002-0001. Turbo is what makes the form below
+    submit without a full page load; it is not wired up here because it is wired up for every
+    page at once.
 
-    IMPORTING TURBO STARTS IT. The vendored ES module calls `start()` at top level, so the bare
-    import is the whole wiring — the form below then submits through Turbo instead of a full
-    page load. No Stimulus here: the mask has no interactive widget, and loading a second
-    library to do nothing is still loading it.
-#}<!doctype html>
-<html lang="de">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{{ title }}</title>
-    <link rel="stylesheet" href="{{ stylesheet }}">
-    {{ importmap|raw }}
-    <script type="module">import '@hotwired/turbo';</script>
-</head>
-<body class="login-page">
+    NO NAVIGATION, ON PURPOSE: the layout's `nav` block stays unfilled. Whoever sees this page is
+    not signed in, and a menu of things they cannot open would be the wrong offer.
+
+    NO STIMULUS, for the same reason as before: the mask has no interactive widget, so it
+    declares no `controllers` and the layout leaves the library unloaded. Loading it to do
+    nothing is still loading it.
+#}{% extends 'layout.html.twig' %}
+
+{% block bodyAttributes %} class="login-page"{% endblock %}
+
+{% block content %}
 <main class="login">
     <h1 class="login__title">{{ title }}</h1>
 
@@ -58,5 +54,4 @@
         <button class="login__submit" type="submit">Anmelden</button>
     </form>
 </main>
-</body>
-</html>
+{% endblock %}
