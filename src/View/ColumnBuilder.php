@@ -9,12 +9,13 @@ use Areanet\ContentflyAdmin\Schema\SchemaClient;
 /**
  * The columns of one entity's list view, derived from the schema alone.
  *
- * THIS IS STAGE 1 OF THE SHAPING CASCADE, the one that runs when nobody has configured
- * anything: the id, then the first few scalar fields, labelled with their humanised property
- * name. It is deliberately plain — the field order is whatever the schema delivers, the labels
- * are technical, and a long text lands in a table cell. That is the accepted price of a list
- * that exists without a line of setup, and the jump to "good" is the attribute-driven stage 2
- * (story 002-008), which will layer `showInList`, `label` and `position` on top of this.
+ * STAGE 1 IS THE FALLBACK, STAGE 2 SITS ON TOP OF IT. Stage 1 is what runs when nobody has
+ * configured anything: the id, then the first few scalar fields, labelled with their humanised
+ * property name, in whatever order the schema delivers. It is deliberately plain — that is the
+ * accepted price of a list that exists without a line of setup. Stage 2 layers the entity's own
+ * attributes over it (ADR 0017): `label` replaces the humanised name and `position` replaces the
+ * schema order, both read through `Shaping`. Which fields are *selected* is still stage 1 here;
+ * `showInList` is task 002-008-0003.
  *
  * IT ANSWERS BOTH QUESTIONS THE LIST ASKS AT ONCE — which columns to show and which fields to
  * request from the core. The caller builds `$properties` for `Api::getList()` out of the same
@@ -123,18 +124,37 @@ final class ColumnBuilder
      */
     public function build(string $entity): array
     {
-        $columns = array($this->column(self::ID_PROPERTY));
-
         $properties = $this->schemaClient->getSchema()[$entity]['properties'] ?? array();
 
+        $selected = array();
+
         foreach ($properties as $property => $meta) {
-            if (count($columns) > self::MAX_FIELDS) {
+            if (count($selected) >= self::MAX_FIELDS) {
                 break;
             }
 
             if ($this->isListable((string) $property, $meta)) {
-                $columns[] = $this->column((string) $property);
+                $selected[] = array('property' => (string) $property, 'meta' => $meta);
             }
+        }
+
+        /*
+         * THE CAP IS APPLIED BEFORE THE SORT, AND THAT ORDER IS THE POINT. `position` answers
+         * "in which order", `showInList` answers "which at all" (ADR 0017) — sorting first would
+         * quietly let `position` decide the selection too, and a field with `position: 1` sitting
+         * past the cap would pull itself into the list without ever saying it wanted to be there.
+         */
+        usort($selected, static function (array $a, array $b): int {
+            return Shaping::comparePosition(
+                Shaping::position($a['meta']),
+                Shaping::position($b['meta'])
+            );
+        });
+
+        $columns = array($this->column(self::ID_PROPERTY, $properties[self::ID_PROPERTY] ?? null));
+
+        foreach ($selected as $field) {
+            $columns[] = $this->column($field['property'], $field['meta']);
         }
 
         return $columns;
@@ -161,19 +181,32 @@ final class ColumnBuilder
     }
 
     /**
+     * One column, labelled by the entity's own `label` where it states one.
+     *
+     * The id gets the same treatment as every other column although it never passes through
+     * `isListable()`. Nobody is likely to label it, but a column that silently ignores an
+     * attribute the next column honours is the kind of exception that costs an afternoon.
+     *
+     * @param array<string,mixed>|mixed $meta The field's schema entry, or null when it has none
+     *
      * @return array{property: string, label: string}
      */
-    private function column(string $property): array
+    private function column(string $property, $meta = null): array
     {
-        return array('property' => $property, 'label' => self::humanise($property));
+        return array(
+            'property' => $property,
+            'label'    => Shaping::label($meta) ?? self::humanise($property),
+        );
     }
 
     /**
      * A property name turned into something a person can read: `seoTitel` → `Seo Titel`.
      *
      * THE CORE SHIPS NO FIELD LABEL. None of the 21 type classes writes a `label` key — gap L1
-     * in `an_project/docs/schema-vertrag.md` — so there is nothing to read and the name itself
-     * is all there is to work with. Stage 2 is where a real label arrives.
+     * in `an_project/docs/schema-vertrag.md` — so there is nothing in the core's own schema to
+     * read and the name itself is all there is to work with. This is the fallback now, not the
+     * only answer: a real label arrives through this package's `#[Admin(label: …)]`, read in
+     * `column()` via `Shaping::label()`.
      *
      * The second pattern keeps acronyms together, so `seoURL` becomes `Seo URL` and not
      * `Seo U R L`. Underscores are word breaks too, so `is_intern` and `isIntern` give the

@@ -706,8 +706,10 @@ final class FormController
      * The fields grouped into tabs, in the order the form shows them.
      *
      * THE DEFAULT TAB COMES FIRST, then every stated tab in the order its first field appears in
-     * the schema. Sorting the tabs by name would reorder a form whenever somebody renames a tab,
-     * and `position` — the attribute that *is* about order — belongs to story 002-008.
+     * the schema. Sorting the tabs by name would reorder a form whenever somebody renames a tab.
+     * `position` — the attribute that *is* about order — orders the fields *inside* a tab and is
+     * applied before this method sees them (`EntityView::byPosition()`, ADR 0017); it deliberately
+     * does not reach the tab order, so nothing here had to change for it.
      *
      * ONE TAB MEANS NO TABS. An entity that states none, which is every entity until a project
      * writes the attribute, comes out as a single group and the template then renders no bar at

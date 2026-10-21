@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Areanet\ContentflyAdmin\View;
 
 use Areanet\ContentflyAdmin\Schema\SchemaClient;
-use Areanet\ContentflyAdmin\Schema\ShapingListener;
 
 /**
  * One entity's schema entry turned into a list definition and a form definition.
@@ -22,10 +21,11 @@ use Areanet\ContentflyAdmin\Schema\ShapingListener;
  * is never read out of the database at all. Whatever moves here later has to keep that double
  * duty; it is the reason the `secret` filter sits in the column rules and not in a template.
  *
- * THE FORM IS STAGE 1 TOO: fields in schema order, labels from the humanised property name,
- * widget per field from the `WidgetResolver`. No tabs, no field order, no `hide`, no `readonly`
- * from an attribute — that is the attribute-driven stage 2 (story 002-008), and the form view
- * that renders all of this is story 002-006.
+ * THE FORM READS STAGE 2 WHERE THE ENTITY STATES IT, and falls back to stage 1 where it does
+ * not: widget per field from the `WidgetResolver`, label from the humanised property name,
+ * fields in schema order. Over that sit the entity's own attributes — `tab`, `readonly` and
+ * `hide` since story 002-006 (ADR 0015), `label` and `position` since 002-008 (ADR 0017). All of
+ * them go through `Shaping`, which is the single reader the list uses as well.
  *
  * WHAT IS NOT AN EDITABLE FIELD. The id is the record's address, not data. The inherited
  * bookkeeping of the core's `Base` is not edited by hand either, and the form has to name those
@@ -92,12 +92,12 @@ final class EntityView
      * reason `ColumnBuilder::build()` yields the id column: the callers have already checked
      * their input against `AdminManager::getEntities()`.
      *
-     * THIS IS THE FIRST READER OF `contentflyAdmin` IN THE PACKAGE (002-006-0003). ADR 0013 §4
-     * said stage 1 does not read it; ADR 0015 narrows that to the `WidgetResolver`, because
-     * `tab`, `readonly` and `hide` decide the *structure* of the form and retrofitting them
-     * would mean cutting the form template twice. The remaining attributes — `label`,
-     * `showInList`, `position`, `isFilterable`, `accept` — and the whole list side stay with
-     * story 002-008, which is why the label here is still the humanised property name.
+     * READS `contentflyAdmin`, AS THE LIST DOES. ADR 0013 §4 said stage 1 does not read it; ADR
+     * 0015 narrowed that to the `WidgetResolver` and brought `tab`, `readonly` and `hide` here,
+     * because they decide the *structure* of the form and retrofitting them would mean cutting
+     * the form template twice. ADR 0017 added `label` and `position`, the two attributes that
+     * work identically in list and form. `showInList` is the list's alone and `isFilterable`
+     * never reaches a form field; `accept` was dropped from the stage altogether.
      *
      * @param string $entity Entity name as the schema spells it
      *
@@ -106,7 +106,7 @@ final class EntityView
     public function formFields(string $entity): array
     {
         $properties = $this->schemaClient->getSchema()[$entity]['properties'] ?? array();
-        $fields     = array();
+        $rows       = array();
 
         foreach ($properties as $property => $meta) {
             $property = (string) $property;
@@ -115,7 +115,7 @@ final class EntityView
                 continue;
             }
 
-            $shaping = self::shaping($meta);
+            $shaping = Shaping::of($meta);
 
             /*
              * `hide` DROPS THE FIELD, it does not merely mark it. The attribute says "keep this
@@ -154,37 +154,62 @@ final class EntityView
 
             $tab = $shaping['tab'] ?? null;
 
-            $fields[] = array(
-                'property' => $property,
-                'label'    => ColumnBuilder::humanise($property),
-                'tab'      => is_string($tab) && $tab !== '' ? $tab : null,
-                'widget'   => $widget,
+            $rows[] = array(
+                'position' => Shaping::position($meta),
+                'field'    => array(
+                    'property' => $property,
+                    'label'    => Shaping::label($meta) ?? ColumnBuilder::humanise($property),
+                    'tab'      => is_string($tab) && $tab !== '' ? $tab : null,
+                    'widget'   => $widget,
+                ),
             );
         }
 
-        return $fields;
+        return self::byPosition($rows);
     }
 
     /**
-     * What this package's own attributes state about one field, or an empty map.
+     * The fields ordered by `position` — within their tab, never across tabs.
      *
-     * The listener writes only the arguments an entity actually stated and leaves everything
-     * else out (`Schema\ShapingListener`), so an absent key means "not stated" and never
-     * "stated false". Reading it through one helper keeps that assumption in one place.
+     * THE TAB ORDER IS NOT THIS ATTRIBUTE'S BUSINESS. `FormController::tabs()` orders the tabs
+     * themselves by where their first field appears in the schema, and ordering by `position`
+     * across the whole form would change that as a side effect: a late field pulled to the front
+     * would drag its whole tab with it, and renaming nothing would have reordered the bar. So the
+     * tab a field belongs to is the first sort key, in first-appearance order, which leaves
+     * `tabs()` producing exactly the grouping it produced before — only the fields inside each
+     * group move.
      *
-     * @param array<string,mixed>|mixed $meta The field's schema entry
+     * `usort()` has been stable since PHP 8.0, which is what makes the schema order the tiebreaker
+     * for equal and absent positions (ADR 0017) without carrying an index around.
      *
-     * @return array<string,mixed>
+     * @param list<array{position: int|null, field: array<string,mixed>}> $rows
+     *
+     * @return list<array<string,mixed>>
      */
-    private static function shaping($meta): array
+    private static function byPosition(array $rows): array
     {
-        if (!is_array($meta)) {
-            return array();
+        $tabOrder = array();
+
+        foreach ($rows as $row) {
+            $tab = $row['field']['tab'] ?? '';
+
+            if (!array_key_exists($tab, $tabOrder)) {
+                $tabOrder[$tab] = count($tabOrder);
+            }
         }
 
-        $shaping = $meta[ShapingListener::SCHEMA_KEY] ?? null;
+        usort($rows, static function (array $a, array $b) use ($tabOrder): int {
+            $tabA = $tabOrder[$a['field']['tab'] ?? ''];
+            $tabB = $tabOrder[$b['field']['tab'] ?? ''];
 
-        return is_array($shaping) ? $shaping : array();
+            if ($tabA !== $tabB) {
+                return $tabA <=> $tabB;
+            }
+
+            return Shaping::comparePosition($a['position'], $b['position']);
+        });
+
+        return array_column($rows, 'field');
     }
 
     /**
