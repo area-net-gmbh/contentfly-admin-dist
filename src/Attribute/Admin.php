@@ -66,6 +66,17 @@ final class Admin
      *                                seven field types carry no `nullable` in the schema at all,
      *                                so for those the admin cannot tell "optional" from
      *                                "unknown". Null leaves the mapping in charge.
+     * @param bool|null   $rte        Edits the field as rich text — bold, italic, paragraphs,
+     *                                lists, links — instead of as plain multi-line text. Only
+     *                                has an effect on a `textarea` field (a `text` column); on
+     *                                anything else it is ignored, because the other types have
+     *                                no room for markup. ADR 0016 §3 records why this is an
+     *                                attribute at all: rich text is a stage-2 case, "no code,
+     *                                just attributes on the entity", and the core has no type
+     *                                for it. Whatever an editor produces is reduced on the
+     *                                server to the elements above (`View\RichText`) — the
+     *                                attribute asks for a different control, never for
+     *                                permission to store arbitrary markup.
      */
     public function __construct(
         public readonly ?string $label = null,
@@ -75,6 +86,7 @@ final class Admin
         public readonly ?bool $readonly = null,
         public readonly ?bool $hide = null,
         public readonly ?bool $required = null,
+        public readonly ?bool $rte = null,
     ) {
     }
 }

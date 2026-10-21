@@ -13,6 +13,7 @@ use Areanet\ContentflyAdmin\View\EntityView;
 use Areanet\ContentflyAdmin\View\FieldError;
 use Areanet\ContentflyAdmin\View\MenuBuilder;
 use Areanet\ContentflyAdmin\View\RelationOptions;
+use Areanet\ContentflyAdmin\View\RichText;
 use Areanet\ContentflyAdmin\View\TemplateRenderer;
 use Areanet\PIM\Classes\Api;
 use Areanet\PIM\Classes\Exceptions\ContentflyException;
@@ -102,6 +103,7 @@ final class FormController
         'time'             => true,
         'json'             => true,
         'select'           => true,
+        'rte'              => true,
         'entity'           => true,
         'entitylist'       => true,
         'radio'            => true,
@@ -472,7 +474,7 @@ final class FormController
              * the template keeps the template free of logic, the same split the field controls
              * already follow.
              */
-            'controllers' => count($tabs) > 1 ? array('admin-tabs' => 'admin/tabs') : array(),
+            'controllers' => self::controllers($tabs, $prepared),
         ));
 
         $response = new Response($html, $status, array('Content-Type' => 'text/html; charset=UTF-8'));
@@ -482,6 +484,37 @@ final class FormController
         }
 
         return $response;
+    }
+
+    /**
+     * The Stimulus controllers this particular form needs, as identifier → module specifier.
+     *
+     * THE LAYOUT LOADS STIMULUS ONLY WHERE A VIEW ASKS FOR IT, and asking is per page and not
+     * per package: a form with one field group needs no tab controller, and a form without a
+     * rich text field needs no editor. Deciding it here rather than in the template keeps the
+     * template free of logic, the same split the field fragments already follow.
+     *
+     * @param list<array<string,mixed>>                        $tabs
+     * @param array<string,array{fragment: string, options: mixed}> $prepared
+     *
+     * @return array<string,string>
+     */
+    private static function controllers(array $tabs, array $prepared): array
+    {
+        $controllers = array();
+
+        if (count($tabs) > 1) {
+            $controllers['admin-tabs'] = 'admin/tabs';
+        }
+
+        foreach ($prepared as $field) {
+            if ($field['fragment'] === RichText::WIDGET) {
+                $controllers['admin-rte'] = 'admin/rte';
+                break;
+            }
+        }
+
+        return $controllers;
     }
 
     /**
@@ -542,6 +575,16 @@ final class FormController
             }
 
             $value = $submitted[$property];
+
+            /*
+             * RICH TEXT IS FILTERED HERE, ON THE WAY IN, AND NOWHERE ELSE. The Stimulus
+             * controller is a convenience that one line of `curl` goes around; a guarantee that
+             * lives in the browser is not a guarantee. `RichText::clean()` is therefore on the
+             * path every submission takes, whether a controller was ever loaded or not.
+             */
+            if ($fragment === RichText::WIDGET && is_string($value)) {
+                $value = RichText::clean($value);
+            }
 
             $data[$property] = $value === '' ? null : $value;
         }

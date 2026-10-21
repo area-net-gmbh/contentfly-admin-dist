@@ -1,0 +1,30 @@
+{#
+    Formatted text — the `rte` key, reached by `#[Admin(rte: true)]` on a `textarea` field
+    (ADR 0016 §3).
+
+    THE TEXTAREA IS THE FIELD, THE EDITOR IS AN OVERLAY. What is submitted always comes from this
+    `textarea`; the Stimulus controller adds an editable surface next to it, keeps the two in step
+    and hides the textarea. Without the module the field is a plain textarea holding HTML —
+    unlovely but completely usable, which is the same stance `admin/tabs` takes.
+
+    WHAT COMES BACK IS FILTERED ON THE SERVER. `FormController::payload()` runs every value
+    through `View\RichText`, so the allowlist holds for a hand-written post as well. The toolbar
+    below is what the filter permits, and the two lists are meant to be read together.
+
+    `document.execCommand` IS WHAT DRIVES IT, and it is formally deprecated. It is also the only
+    thing that applies formatting to a selection without a third-party library, which the package
+    cannot take on (ADR 0007, no npm build). Every browser still implements it; the day one stops,
+    the field falls back to being a textarea, which is why the textarea stays the field.
+#}
+{% include 'widget/_label.html.twig' %}
+            <div class="admin-form__rte" data-controller="admin-rte" data-admin-rte-field-value="field-{{ field.property }}">
+                <div class="admin-form__rte-bar" role="toolbar" aria-label="Textformatierung" data-admin-rte-target="bar" hidden>
+                    <button class="admin-form__rte-button" type="button" data-action="admin-rte#bold" title="Fett"><strong>B</strong></button>
+                    <button class="admin-form__rte-button" type="button" data-action="admin-rte#italic" title="Kursiv"><em>I</em></button>
+                    <button class="admin-form__rte-button" type="button" data-action="admin-rte#bullets" title="Liste">&bull;</button>
+                    <button class="admin-form__rte-button" type="button" data-action="admin-rte#numbers" title="Nummerierte Liste">1.</button>
+                    <button class="admin-form__rte-button" type="button" data-action="admin-rte#link" title="Link">&#128279;</button>
+                    <button class="admin-form__rte-button" type="button" data-action="admin-rte#unlink" title="Link entfernen">&#9003;</button>
+                </div>
+                <textarea class="admin-form__control" id="field-{{ field.property }}" name="{{ field.property }}" rows="10" data-admin-rte-target="source"{% if field.required %} required{% endif %}{% if field.error %} aria-invalid="true" aria-describedby="{{ described }}"{% endif %}>{{ field.value }}</textarea>
+            </div>

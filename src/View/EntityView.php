@@ -140,6 +140,18 @@ final class EntityView
                 $widget['readonly'] = true;
             }
 
+            /*
+             * `rte` CHANGES THE ELEMENT, AND ONLY FOR A `textarea`. ADR 0016 §3 put the reading
+             * of it here rather than in the resolver, in the line of ADR 0015: the resolver
+             * answers stage 1, from the mapping alone, and the mapping knows nothing about rich
+             * text. The guard on the alias is not politeness — a `string` or a `json` column has
+             * no room for markup, and a rich text control over one would produce HTML that the
+             * field cannot hold.
+             */
+            if (($shaping['rte'] ?? null) === true && ($widget['type'] ?? null) === RichText::TYPE) {
+                $widget['widget'] = RichText::WIDGET;
+            }
+
             $tab = $shaping['tab'] ?? null;
 
             $fields[] = array(

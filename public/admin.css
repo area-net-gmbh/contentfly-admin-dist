@@ -523,3 +523,97 @@ li {
     color: var(--admin-muted);
     font-size: 0.875rem;
 }
+
+/*
+ * Radio buttons and checkbox groups — a relation or an option group, laid out as a column
+ * (002-007-0004).
+ *
+ * A COLUMN AND NOT A ROW. The labels are record names of arbitrary length; wrapped into rows
+ * they produce a ragged grid in which it is genuinely hard to see which box belongs to which
+ * name. Vertical is slower to scan and never ambiguous.
+ */
+.admin-form__radios,
+.admin-form__checkboxes {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    max-width: 44rem;
+    padding: 0.5rem 0.625rem;
+    border: 1px solid var(--admin-rule);
+    border-radius: 3px;
+}
+
+.admin-form__radios .admin-form__label--inline,
+.admin-form__checkboxes .admin-form__label--inline {
+    margin: 0;
+}
+
+/*
+ * The rich text field (002-007-0005).
+ *
+ * THE SURFACE IS THE TEXTAREA'S TWIN, so it carries the same frame, padding and focus ring —
+ * anything else and the field would read as a different kind of control depending on whether
+ * the module loaded.
+ */
+.admin-form__rte {
+    max-width: 44rem;
+}
+
+.admin-form__rte-bar {
+    display: flex;
+    gap: 0.25rem;
+    margin-bottom: 0.25rem;
+}
+
+.admin-form__rte-button {
+    min-width: 2rem;
+    padding: 0.25rem 0.5rem;
+    border: 1px solid var(--admin-rule);
+    border-radius: 3px;
+    font: inherit;
+    color: inherit;
+    background: var(--admin-background);
+    cursor: pointer;
+}
+
+.admin-form__rte-button:hover {
+    background: var(--admin-hover-dim);
+}
+
+.admin-form__rte-button:focus-visible {
+    outline: 2px solid var(--admin-accent);
+    outline-offset: 1px;
+}
+
+.admin-form__rte-surface {
+    min-height: 10rem;
+    padding: 0.5rem 0.625rem;
+    border: 1px solid var(--admin-rule);
+    border-radius: 3px;
+    background: var(--admin-background);
+    overflow-y: auto;
+}
+
+.admin-form__rte-surface:focus-visible {
+    outline: 2px solid var(--admin-accent);
+    outline-offset: 1px;
+}
+
+/* The editor's own content: the elements `View\RichText` allows, and no others. */
+.admin-form__rte-surface p {
+    margin: 0 0 0.625rem;
+}
+
+.admin-form__rte-surface p:last-child {
+    margin-bottom: 0;
+}
+
+.admin-form__rte-surface ul,
+.admin-form__rte-surface ol {
+    margin: 0 0 0.625rem;
+    padding-left: 1.5rem;
+}
+
+.admin-form__field--invalid .admin-form__rte-surface {
+    border-color: var(--admin-danger);
+}

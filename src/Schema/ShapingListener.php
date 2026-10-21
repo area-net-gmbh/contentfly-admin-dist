@@ -98,6 +98,7 @@ final class ShapingListener
             'readonly'   => $annotation->readonly,
             'hide'       => $annotation->hide,
             'required'   => $annotation->required,
+            'rte'        => $annotation->rte,
         ];
 
         return array_filter($alle, static fn ($wert): bool => $wert !== null);

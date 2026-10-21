@@ -42,6 +42,7 @@ final class Importmap
         '@hotwired/turbo'    => 'vendor/turbo-8.0.23.js',
         'admin/hello'        => 'controllers/hello_controller.js',
         'admin/tabs'         => 'controllers/tabs_controller.js',
+        'admin/rte'          => 'controllers/rte_controller.js',
     );
 
     /**
