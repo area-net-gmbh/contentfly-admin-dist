@@ -13,9 +13,23 @@ use Areanet\ContentflyAdmin\Schema\SchemaClient;
  * configured anything: the id, then the first few scalar fields, labelled with their humanised
  * property name, in whatever order the schema delivers. It is deliberately plain — that is the
  * accepted price of a list that exists without a line of setup. Stage 2 layers the entity's own
- * attributes over it (ADR 0017): `label` replaces the humanised name and `position` replaces the
- * schema order, both read through `Shaping`. Which fields are *selected* is still stage 1 here;
- * `showInList` is task 002-008-0003.
+ * attributes over it (ADR 0017), all read through `Shaping`: `label` replaces the humanised name,
+ * `position` replaces the schema order, and `showInList` replaces the selection itself.
+ *
+ * A STATED SELECTION REPLACES THE AUTOMATIC ONE, IT DOES NOT EXTEND IT. One `showInList: true`
+ * anywhere on the entity switches the automatic fill off entirely, so the list shows exactly the
+ * fields that asked to be there (ADR 0017 §1). Extending instead would put three chosen columns
+ * next to five guessed ones, and nothing in the table says which is which. An entity that only
+ * states `showInList: false` keeps the automatic fill for its remaining fields — it has excluded
+ * something, not answered the question.
+ *
+ * TWO GATES NO ATTRIBUTE REACHES, and the split between `isRenderable()` and `isListable()` is
+ * where that lives. `secret` is the obvious one. The type allowlist is the other and it is just
+ * as hard: `{{ row.cells[column.property] }}` in the template would print `Array` for a relation,
+ * so "the entity asked for it" cannot make a relation into a table cell. Both are the
+ * Core-Wahrheit that ADR 0017 keeps stage 2 away from — in contrast to the bookkeeping-field
+ * filter, which is a stage 1 *guess* about relevance and therefore does give way to an explicit
+ * `showInList: true`.
  *
  * IT ANSWERS BOTH QUESTIONS THE LIST ASKS AT ONCE — which columns to show and which fields to
  * request from the core. The caller builds `$properties` for `Api::getList()` out of the same
@@ -52,11 +66,16 @@ final class ColumnBuilder
     public const ID_PROPERTY = 'id';
 
     /**
-     * How many scalar fields follow the id at most.
+     * How many scalar fields the *automatic* selection puts after the id at most.
      *
      * A constant and not an option: zero configuration is the hard design rule of this package,
      * and a list that needs tuning before it is readable has already lost the projects it is
      * for. Five is the upper end of the "three to five" the concept names.
+     *
+     * It bounds stage 1 and nothing else (ADR 0017 §1). An entity that states `showInList: true`
+     * is not counted against it and not cut off by it — the cap exists to keep an *unconfigured*
+     * list readable, and holding it against a project that has said what it wants would make the
+     * attribute useless exactly where it matters, on an entity with many fields.
      */
     public const MAX_FIELDS = 5;
 
@@ -129,12 +148,28 @@ final class ColumnBuilder
         $selected = array();
 
         foreach ($properties as $property => $meta) {
-            if (count($selected) >= self::MAX_FIELDS) {
-                break;
-            }
-
-            if ($this->isListable((string) $property, $meta)) {
+            if ($this->isRenderable((string) $property, $meta)
+                && Shaping::flag($meta, 'showInList') === true
+            ) {
                 $selected[] = array('property' => (string) $property, 'meta' => $meta);
+            }
+        }
+
+        /*
+         * THE AUTOMATIC FILL ONLY RUNS WHEN NOTHING WAS CHOSEN. This is the one place the "stated
+         * selection replaces the automatic one" rule is implemented, and it is an `if` and not a
+         * subtraction on purpose: the cap counts stage 1's own guesses, so it must never see a
+         * field that asked for its column.
+         */
+        if ($selected === array()) {
+            foreach ($properties as $property => $meta) {
+                if (count($selected) >= self::MAX_FIELDS) {
+                    break;
+                }
+
+                if ($this->isListable((string) $property, $meta)) {
+                    $selected[] = array('property' => (string) $property, 'meta' => $meta);
+                }
             }
         }
 
@@ -161,13 +196,20 @@ final class ColumnBuilder
     }
 
     /**
-     * Whether one field of the schema earns a column.
+     * Whether one field *can* be a column at all — the gates no attribute overrides.
+     *
+     * `hide` and `showInList: false` are in here rather than in `isListable()` because they are
+     * refusals, and a refusal has to hold on the explicit path too: `#[Admin(hide: true, …)]`
+     * means "keep this out of the admin entirely" (`Attribute\Admin`), so it cannot be undone by
+     * the same attribute's `showInList`. Closing that is what 002-008-0003 was for — `hide` used
+     * to be read by the form alone, which left a field the form refuses to render able to become
+     * a list column.
      *
      * @param array<string,mixed>|mixed $meta The field's schema entry
      */
-    private function isListable(string $property, $meta): bool
+    private function isRenderable(string $property, $meta): bool
     {
-        if ($property === self::ID_PROPERTY || in_array($property, self::TECHNICAL_PROPERTIES, true)) {
+        if ($property === self::ID_PROPERTY) {
             return false;
         }
 
@@ -177,7 +219,29 @@ final class ColumnBuilder
 
         $type = $meta['type'] ?? null;
 
-        return is_string($type) && in_array($type, self::LISTABLE_TYPES, true);
+        if (!is_string($type) || !in_array($type, self::LISTABLE_TYPES, true)) {
+            return false;
+        }
+
+        if (Shaping::flag($meta, 'hide') === true) {
+            return false;
+        }
+
+        return Shaping::flag($meta, 'showInList') !== false;
+    }
+
+    /**
+     * Whether one field earns a column from stage 1 alone, without the entity saying anything.
+     *
+     * Everything `isRenderable()` refuses, plus the bookkeeping fields — the one filter here that
+     * is a guess and not a rule, which is why an explicit `showInList: true` gets past it.
+     *
+     * @param array<string,mixed>|mixed $meta The field's schema entry
+     */
+    private function isListable(string $property, $meta): bool
+    {
+        return $this->isRenderable($property, $meta)
+            && !in_array($property, self::TECHNICAL_PROPERTIES, true);
     }
 
     /**
