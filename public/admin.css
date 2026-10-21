@@ -468,3 +468,20 @@ li {
     outline: 2px solid var(--admin-accent);
     outline-offset: -2px;
 }
+
+/*
+ * A rejected save (002-006-0004).
+ *
+ * The same shape the sign-in mask uses for its error, and for the same reason: the message is
+ * announced by `role="alert"` in the template, the left rule makes it findable without reading,
+ * and the colour alone never carries the message. It stays above the form until story
+ * 002-006-0005 can put a finding at the field that caused it.
+ */
+.admin-form__error {
+    max-width: 44rem;
+    margin: 0 0 1.25rem;
+    padding: 0.75rem 1rem;
+    border-left: 3px solid var(--admin-danger);
+    background: var(--admin-danger-surface);
+    color: var(--admin-danger-text);
+}

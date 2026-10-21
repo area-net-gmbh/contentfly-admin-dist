@@ -7,7 +7,6 @@ namespace Areanet\ContentflyAdmin\Auth;
 use Areanet\ContentflyAdmin\AdminManager;
 use Areanet\ContentflyAdmin\Asset\Importmap;
 use Areanet\ContentflyAdmin\View\TemplateRenderer;
-use Symfony\Component\HttpFoundation\Cookie;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -41,16 +40,16 @@ final class LoginScreen
     public const CONTAINER_KEY = 'contentfly_admin.login_screen';
 
     /**
-     * The form token's cookie.
+     * The form token's cookie and field.
      *
-     * A SECOND COOKIE AND NOT THE SESSION ONE, because the two have opposite lifecycles: this
-     * one has to exist *before* anybody is signed in, which is precisely when there is no
-     * session cookie to hang it on.
+     * THE MECHANISM MOVED TO `Auth\FormToken` in story 002-006-0004, when the form view became
+     * its second caller; these two stay as the names this screen was written against, so no
+     * caller had to change.
      */
-    public const TOKEN_COOKIE_NAME = 'contentfly_admin_form';
+    public const TOKEN_COOKIE_NAME = FormToken::COOKIE_NAME;
 
     /** The hidden field carrying the same value back. */
-    public const TOKEN_FIELD = '_token';
+    public const TOKEN_FIELD = FormToken::FIELD;
 
     private AdminManager $manager;
 
@@ -100,14 +99,7 @@ final class LoginScreen
      */
     public function verifyToken(Request $request): bool
     {
-        $expected  = $request->cookies->get(self::TOKEN_COOKIE_NAME);
-        $submitted = $request->request->all()[self::TOKEN_FIELD] ?? null;
-
-        if (!is_string($expected) || $expected === '' || !is_string($submitted) || $submitted === '') {
-            return false;
-        }
-
-        return hash_equals($expected, $submitted);
+        return FormToken::verify($request);
     }
 
     /**
@@ -126,9 +118,8 @@ final class LoginScreen
         string $alias,
         array $headers = array()
     ): Response {
-        $existing = $request->cookies->get(self::TOKEN_COOKIE_NAME);
-        $reused   = is_string($existing) && $existing !== '';
-        $token    = $reused ? $existing : bin2hex(random_bytes(32));
+        $token  = FormToken::issue($request);
+        $reused = FormToken::isIssued($request, $token);
 
         $prefix = $this->manager->getPrefix();
 
@@ -150,37 +141,9 @@ final class LoginScreen
         );
 
         if (!$reused) {
-            $response->headers->setCookie($this->tokenCookie($request, $token));
+            $response->headers->setCookie(FormToken::cookie($request, $token, $prefix));
         }
 
         return $response;
-    }
-
-    /**
-     * The token cookie, with the same attributes as the session cookie.
-     *
-     * `HttpOnly` IS CORRECT EVEN THOUGH THIS IS A DOUBLE-SUBMIT TOKEN. The classic pattern has
-     * JavaScript read the cookie and copy it into a header; here the *server* renders the value
-     * into the form, so nothing in the browser ever needs to read it. Keeping it unreadable
-     * costs nothing and removes it as a target for injected script.
-     *
-     * No lifetime, for the same reason the session cookie has none: it is only meaningful for
-     * as long as the form it belongs to is open.
-     */
-    private function tokenCookie(Request $request, string $value): Cookie
-    {
-        $prefix = $this->manager->getPrefix();
-
-        return Cookie::create(
-            self::TOKEN_COOKIE_NAME,
-            $value,
-            0,
-            $prefix === '' ? '/' : $prefix,
-            null,
-            $request->isSecure(),
-            true,
-            false,
-            Cookie::SAMESITE_LAX
-        );
     }
 }

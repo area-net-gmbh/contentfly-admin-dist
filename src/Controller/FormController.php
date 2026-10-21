@@ -6,6 +6,7 @@ namespace Areanet\ContentflyAdmin\Controller;
 
 use Areanet\ContentflyAdmin\AdminManager;
 use Areanet\ContentflyAdmin\Asset\Importmap;
+use Areanet\ContentflyAdmin\Auth\FormToken;
 use Areanet\ContentflyAdmin\Schema\SchemaClient;
 use Areanet\ContentflyAdmin\View\EntityView;
 use Areanet\ContentflyAdmin\View\MenuBuilder;
@@ -13,6 +14,7 @@ use Areanet\ContentflyAdmin\View\TemplateRenderer;
 use Areanet\PIM\Classes\Api;
 use Areanet\PIM\Classes\Exceptions\ContentflyException;
 use Areanet\PIM\Classes\Language;
+use Symfony\Component\HttpKernel\HttpKernelInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -27,11 +29,11 @@ use Symfony\Component\HttpFoundation\Response;
  * same shape `AssetController` already uses for its three depths. `$id` simply stays `null` on
  * the shorter one.
  *
- * BOTH ROUTES ARE `match()`, although this task only answers GET. Routes inside one provider
- * are keyed by their own name (`CustomControllerProvider::post/get/match`), so a `post()` added
- * next to a `get()` on the same path would not add a route — it would silently replace the one
- * already there. Registering `match()` now means story 002-006-0004 adds the POST branch inside
- * this action instead of touching the mount, where the mistake would be invisible.
+ * BOTH ROUTES ARE `match()`, and both answer GET and POST. Routes inside one provider are keyed
+ * by their own name (`CustomControllerProvider::post/get/match`), so a `post()` written next to
+ * a `get()` on the same path would not add a route — it would silently replace the one already
+ * there. The branch therefore sits in `formAction()`, which is also where the login route puts
+ * it.
  *
  * THE WHITELIST IS CHECKED HERE, for the reason `ListController` states: `MenuBuilder` decides
  * what is linked, and a boundary that only holds for people who click is none (ADR 0005).
@@ -39,7 +41,15 @@ use Symfony\Component\HttpFoundation\Response;
  * THE VALUES COME FROM `Api::getSingle()` AND THE FIELDS FROM `EntityView`. The two are
  * deliberately separate: the schema says which fields exist and how they are edited, the record
  * says what is in them. `formFields()` knows nothing about values and must not — it is the same
- * list for the empty form and the filled one.
+ * list for the empty form and the filled one. There is a third source of values, and keeping it
+ * interchangeable with the other two is the whole point of passing a plain map: a rejected
+ * submission renders the input the editor just typed, not the record on disk.
+ *
+ * WRITING GOES THROUGH A SUB-REQUEST AND ANSWERS TURBO'S CONTRACT — 303 on success, 422 with
+ * the re-rendered form on a rejection. Both are settled in ADR 0014, together with the reason
+ * `replace` is not used and why the field assignment of a validation error has to wait for
+ * story 002-006-0005. The CSRF token is `Auth\FormToken`, checked before the core is spoken
+ * to; ADR 0010 assigned that promise to this story.
  */
 final class FormController
 {
@@ -68,9 +78,10 @@ final class FormController
      * A KEY THAT IS ABSENT IS SHOWN, NOT OFFERED — see `control()`. That covers `entity`,
      * `entitylist`, `file`, `filelist`, `radio`, `checkboxgroup` and `permissionmatrix`, and it
      * is the same reasoning ADR 0013 used for its `readonly` fallback: those widgets need the
-     * records or files they point at, and offering a bare text box for a relation would let
-     * story 002-006-0004 write a value this package cannot yet form correctly. Displaying the
-     * value risks nothing and is the honest answer until 002-007 builds them.
+     * records or files they point at, and a bare text box over a relation would be a control
+     * whose value this package cannot yet form correctly. Displaying it risks nothing and is
+     * the honest answer until 002-007 builds them. `payload()` relies on this: what is shown
+     * rather than offered is never written, whatever arrives in the body.
      */
     private const CONTROLS = array(
         'text'     => 'text',
@@ -108,15 +119,6 @@ final class FormController
             return $refusal;
         }
 
-        /*
-         * WRITING IS STORY 002-006-0004. The route accepts POST so that story does not have to
-         * re-register it (see the class note); until then an attempt is refused rather than
-         * answered with the unchanged form, which would look like a save that worked.
-         */
-        if (!$request->isMethod('GET')) {
-            return new Response('', 405, array('Allow' => 'GET'));
-        }
-
         $manager = $this->app[AdminManager::CONTAINER_KEY];
         $name    = MenuBuilder::urlToEntity($entity);
 
@@ -137,38 +139,207 @@ final class FormController
             );
         }
 
+        $fields = $this->app[EntityView::CONTAINER_KEY]->formFields($name);
+
+        if ($request->isMethod('POST')) {
+            return $this->save($request, $name, $id, $language, $fields);
+        }
+
+        if (!$request->isMethod('GET')) {
+            return new Response('', 405, array('Allow' => 'GET, POST'));
+        }
+
+        return $this->show($request, $name, $id, $language, $fields);
+    }
+
+    /**
+     * The form as a GET gets it: the record's values, or an empty form.
+     *
+     * @param list<array<string,mixed>> $fields
+     */
+    private function show(Request $request, string $name, ?string $id, ?string $language, array $fields): Response
+    {
         $record = null;
 
         if ($id !== null) {
-            /*
-             * AN UNKNOWN ID IS A 404, NOT AN EMPTY FORM. `getSingle()` answers `null` for a
-             * record that is not there (`Api.php`), and rendering the create form instead would
-             * invite an editor to retype a record they believe they are correcting — the save
-             * would then add a second one. It throws for an entity the schema does not know and
-             * for a record the user may not read; both are caught, because a hand-edited URL
-             * must not reach the core's debug page.
-             */
-            try {
-                $record = (new Api($this->app, $request))->getSingle($name, $id, null, $language);
-            } catch (ContentflyException $denied) {
-                return new Response('', 404);
-            }
+            $record = $this->load($request, $name, $id, $language);
 
-            /*
-             * `getSingle()` ANSWERS AN OBJECT, NOT AN ARRAY. With `$returnObject = false` it
-             * returns `toValueObject()`, and that is a `stdClass` whose properties are the
-             * fields — the same shape `getList()` puts in its `objects`, which is why
-             * `ListController` reads its cells with `->`. Checking for an array here passed the
-             * empty form and turned every existing record into a 404.
-             */
-            if (!is_object($record)) {
+            if ($record === null) {
                 return new Response('', 404);
             }
         }
 
-        $fields = $this->app[EntityView::CONTAINER_KEY]->formFields($name);
-        $tabs   = self::tabs($fields, $record);
-        $base   = $manager->getPrefix().'/form/'.MenuBuilder::entityToUrl($name);
+        return $this->render($request, $name, $id, $fields, self::recordValues($fields, $record), 200, null);
+    }
+
+    /**
+     * One record, or `null` when it is not there or not readable.
+     *
+     * AN UNKNOWN ID IS A 404, NOT AN EMPTY FORM. `getSingle()` answers `null` for a record that
+     * is not there, and rendering the create form instead would invite an editor to retype a
+     * record they believe they are correcting — the save would then add a second one. It throws
+     * for an entity the schema does not know and for a record the user may not read; both are
+     * caught, because a hand-edited URL must not reach the core's debug page.
+     *
+     * `getSingle()` ANSWERS AN OBJECT, NOT AN ARRAY. With `$returnObject = false` it returns
+     * `toValueObject()`, and that is a `stdClass` whose properties are the fields — the same
+     * shape `getList()` puts in its `objects`, which is why `ListController` reads its cells
+     * with `->`.
+     */
+    private function load(Request $request, string $name, string $id, ?string $language): ?object
+    {
+        try {
+            $record = (new Api($this->app, $request))->getSingle($name, $id, null, $language);
+        } catch (ContentflyException $denied) {
+            return null;
+        }
+
+        return is_object($record) ? $record : null;
+    }
+
+    /**
+     * Saving, as ADR 0014 settled it.
+     *
+     * THE TOKEN IS CHECKED BEFORE ANYTHING ELSE HAPPENS, and before the core is spoken to at
+     * all. ADR 0010 assigned the CSRF protection of writing actions to this story, and the
+     * order matters for a second reason the login path already learned: a forged post that
+     * reached the core would drive its throttle and could lock somebody out of their own admin.
+     *
+     * `insert` AND `update`, NOT `replace`. ADR 0014 records why: `replaceAction` checks the
+     * permissions before the lookup and so demands read *and* write rights, and it decides for
+     * itself whether it inserts or updates — a stricter requirement with less control, for a
+     * mask that already knows which of the two it is doing.
+     *
+     * THE CORE IS REACHED BY SUB-REQUEST because `insert` and `update` exist only as actions of
+     * `ApiController`; the directly callable `Api::doInsert()`/`doUpdate()` answer with an
+     * object or an array and no envelope, and the envelope is what an error message has to be
+     * read out of. The data goes into the `request` bag and not into a JSON body: the core's
+     * global `before` hooks do not run for a sub-request, so nothing would unpack it.
+     *
+     * @param list<array<string,mixed>> $fields
+     */
+    private function save(Request $request, string $name, ?string $id, ?string $language, array $fields): Response
+    {
+        if (!FormToken::verify($request)) {
+            return $this->reject(
+                $request,
+                $name,
+                $id,
+                $fields,
+                'Das Formular ist abgelaufen oder wurde nicht von dieser Seite abgeschickt. Bitte erneut absenden.',
+                $language
+            );
+        }
+
+        $payload = array(
+            'entity' => $name,
+            'data'   => self::payload($fields, $request),
+        );
+
+        if ($id !== null) {
+            $payload['id'] = $id;
+        }
+
+        if ($language !== null) {
+            /* `Language::fromRequest()` reads the body, which is why this travels as a field. */
+            $payload['lang'] = $language;
+        }
+
+        $sub = Request::create(
+            $id === null ? '/api/insert' : '/api/update',
+            'POST',
+            $payload,
+            array(),
+            array(),
+            $request->server->all()
+        );
+
+        $response = $this->app->handle($sub, HttpKernelInterface::SUB_REQUEST);
+        $envelope = json_decode((string) $response->getContent(), true);
+        $envelope = is_array($envelope) ? $envelope : array();
+        $errors   = $envelope['errors'] ?? null;
+
+        if ($response->getStatusCode() !== 200 || (is_array($errors) && $errors !== array())) {
+            return $this->reject(
+                $request,
+                $name,
+                $id,
+                $fields,
+                self::message($errors, $response->getStatusCode()),
+                $language
+            );
+        }
+
+        /*
+         * 303 AND NOT 200, because that is Turbo's contract: it treats a 2xx answer to a form
+         * submission as a navigation it cannot apply and would leave the browser on the old
+         * page. The redirect goes to the saved record's own form, so an insert lands on the
+         * record it just created rather than on an empty mask that invites a second one.
+         */
+        $saved = $id ?? self::savedId($envelope);
+        $base  = $this->app[AdminManager::CONTAINER_KEY]->getPrefix().'/form/'.MenuBuilder::entityToUrl($name);
+
+        if ($saved === null) {
+            /*
+             * The core answered success without an id. Nothing is wrong with the record, so this
+             * must not look like a failure — but there is no record page to go to either, and
+             * the list is the honest destination.
+             */
+            return new Response('', 303, array(
+                'Location' => $this->app[AdminManager::CONTAINER_KEY]->getPrefix().'/list/'.MenuBuilder::entityToUrl($name),
+            ));
+        }
+
+        return new Response('', 303, array('Location' => $base.'/'.rawurlencode($saved)));
+    }
+
+    /**
+     * The form again, with the submitted input still in it and a message above it.
+     *
+     * 422 IS THE OTHER HALF OF TURBO'S CONTRACT: a rejected submission answers a non-2xx with
+     * the re-rendered form, and Turbo then swaps it in place. A 200 here would be discarded and
+     * the editor would be left looking at the form they submitted, with no message and no clue.
+     *
+     * THE RECORD IS LOADED AGAIN ON THIS PATH, and only on it. The display-only fields — a
+     * relation, a file, anything `readonly` — are not submitted, so without the record they
+     * would come back empty and the rejected form would look as if it had lost data it never
+     * carried.
+     *
+     * @param list<array<string,mixed>> $fields
+     */
+    private function reject(
+        Request $request,
+        string $name,
+        ?string $id,
+        array $fields,
+        ?string $error,
+        ?string $language
+    ): Response {
+        $record = $id === null ? null : $this->load($request, $name, $id, $language);
+        $values = self::submittedValues($fields, $request) + self::recordValues($fields, $record);
+
+        return $this->render($request, $name, $id, $fields, $values, 422, $error);
+    }
+
+    /**
+     * The one place the form is turned into a response.
+     *
+     * @param list<array<string,mixed>> $fields
+     * @param array<string,mixed>       $values
+     */
+    private function render(
+        Request $request,
+        string $name,
+        ?string $id,
+        array $fields,
+        array $values,
+        int $status,
+        ?string $error
+    ): Response {
+        $manager = $this->app[AdminManager::CONTAINER_KEY];
+        $tabs    = self::tabs($fields, $values);
+        $base    = $manager->getPrefix().'/form/'.MenuBuilder::entityToUrl($name);
+        $token   = FormToken::issue($request);
 
         $html = $this->app[TemplateRenderer::CONTAINER_KEY]->render('form.html.twig', array(
             'title'      => $name.' — '.$manager->getTitle(),
@@ -180,6 +351,9 @@ final class FormController
             'isNew'      => $id === null,
             'listUrl'    => $manager->getPrefix().'/list/'.MenuBuilder::entityToUrl($name),
             'action'     => $id === null ? $base : $base.'/'.rawurlencode($id),
+            'tokenField' => FormToken::FIELD,
+            'token'      => $token,
+            'error'      => $error,
             'tabs'       => $tabs,
             /*
              * THE LAYOUT LOADS STIMULUS ONLY WHERE A VIEW ASKS FOR IT, and this view only needs
@@ -190,7 +364,186 @@ final class FormController
             'controllers' => count($tabs) > 1 ? array('admin-tabs' => 'admin/tabs') : array(),
         ));
 
-        return new Response($html, 200, array('Content-Type' => 'text/html; charset=UTF-8'));
+        $response = new Response($html, $status, array('Content-Type' => 'text/html; charset=UTF-8'));
+
+        if (!FormToken::isIssued($request, $token)) {
+            $response->headers->setCookie(FormToken::cookie($request, $token, $manager->getPrefix()));
+        }
+
+        return $response;
+    }
+
+    /**
+     * The fields this form is allowed to write, as the core's `data` map.
+     *
+     * A `display` FIELD IS NEVER WRITTEN, whatever arrives in the body. The list comes from the
+     * field definitions and not from the request, so a hand-crafted post cannot add a property
+     * the form does not offer — which covers both halves at once: a field the entity marks
+     * `readonly` or `hide`, and a relation whose widget story 002-007 has yet to build.
+     *
+     * AN UNCHECKED BOX SENDS NOTHING AT ALL. A boolean therefore has to be derived from presence
+     * rather than read from the body, or unticking one could never be saved.
+     *
+     * THE EMPTY STRING BECOMES `null`, because that is what clearing a field means to a nullable
+     * column. For a column that is not nullable the core rejects it, which is the correct answer
+     * and now arrives as a message on the field's own form.
+     *
+     * @param list<array<string,mixed>> $fields
+     *
+     * @return array<string,mixed>
+     */
+    private static function payload(array $fields, Request $request): array
+    {
+        $submitted = $request->request->all();
+        $data      = array();
+
+        foreach ($fields as $field) {
+            if (self::control($field['widget']) === 'display') {
+                continue;
+            }
+
+            $property = $field['property'];
+
+            if (($field['widget']['widget'] ?? null) === 'boolean') {
+                $data[$property] = array_key_exists($property, $submitted);
+                continue;
+            }
+
+            if (!array_key_exists($property, $submitted)) {
+                continue;
+            }
+
+            $value = $submitted[$property];
+
+            $data[$property] = $value === '' ? null : $value;
+        }
+
+        return $data;
+    }
+
+    /**
+     * What the editor is told about a rejected save. Never empty.
+     *
+     * DELIBERATELY RAW, AND DELIBERATELY NOT AT A FIELD. Assigning an error to the field that
+     * caused it, and turning the core's message key into German, is story 002-006-0005 — the
+     * core names no field (gap L19) and `detail` is only the message key (L21), so both need
+     * the one encapsulated place ADR 0014 describes. Until then the editor gets the finding
+     * above the form rather than a save that silently did nothing.
+     *
+     * THERE IS ALWAYS A FALLBACK, and it is not defensive padding — it covers a case that is
+     * reproducible today. With `APP_DEBUG` on, the core's error handler answers a validation
+     * failure with its debug page instead of the envelope (`bootstrap-web.php`), so there is
+     * nothing to read; the development harness runs exactly that way on purpose. A 422 carrying
+     * no message would then look to an editor like a save that quietly did nothing, which is
+     * the one outcome this whole path exists to prevent. The debug page itself is never shown:
+     * it is a stack trace.
+     *
+     * @param mixed $errors
+     */
+    private static function message($errors, int $status): string
+    {
+        $found = self::firstError($errors);
+
+        if ($found !== null) {
+            return $found;
+        }
+
+        return 'Das Speichern wurde abgelehnt, und die Antwort des Grundsystems enthielt keine '
+            .'auswertbare Meldung (Status '.$status.').';
+    }
+
+    /**
+     * The first error of the envelope as one plain string, or `null` when there is none to read.
+     *
+     * @param mixed $errors
+     */
+    private static function firstError($errors): ?string
+    {
+        if (!is_array($errors) || $errors === array()) {
+            return null;
+        }
+
+        $first = $errors[0] ?? null;
+
+        if (!is_array($first)) {
+            return null;
+        }
+
+        foreach (array('detail', 'code') as $key) {
+            $value = $first[$key] ?? null;
+
+            if (is_string($value) && $value !== '') {
+                return $value;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The id the core reports for a freshly inserted record, or `null`.
+     *
+     * @param array<string,mixed> $envelope
+     */
+    private static function savedId(array $envelope): ?string
+    {
+        $data = $envelope['data'] ?? null;
+        $id   = is_array($data) ? ($data['id'] ?? null) : null;
+
+        return is_scalar($id) && (string) $id !== '' ? (string) $id : null;
+    }
+
+    /**
+     * The values a GET renders: the record's, or the schema defaults for a new record.
+     *
+     * @param list<array<string,mixed>> $fields
+     *
+     * @return array<string,mixed>
+     */
+    private static function recordValues(array $fields, ?object $record): array
+    {
+        $values = array();
+
+        foreach ($fields as $field) {
+            $property = $field['property'];
+
+            $values[$property] = $record === null
+                ? ($field['widget']['default'] ?? null)
+                : ($record->{$property} ?? null);
+        }
+
+        return $values;
+    }
+
+    /**
+     * The values a rejected submission renders — only the fields the form actually offers.
+     *
+     * The display-only fields are left out on purpose, so the record's own values fill them in
+     * (`reject()`); they were never submitted and inventing an empty value for them would make
+     * the rejected form look as though it had dropped data.
+     *
+     * @param list<array<string,mixed>> $fields
+     *
+     * @return array<string,mixed>
+     */
+    private static function submittedValues(array $fields, Request $request): array
+    {
+        $submitted = $request->request->all();
+        $values    = array();
+
+        foreach ($fields as $field) {
+            if (self::control($field['widget']) === 'display') {
+                continue;
+            }
+
+            $property = $field['property'];
+
+            $values[$property] = ($field['widget']['widget'] ?? null) === 'boolean'
+                ? array_key_exists($property, $submitted)
+                : ($submitted[$property] ?? null);
+        }
+
+        return $values;
     }
 
     /**
@@ -227,11 +580,11 @@ final class FormController
      * all — so this task changes nothing for an unshaped entity.
      *
      * @param list<array{property: string, label: string, tab: string|null, widget: array<string,mixed>}> $fields
-     * @param object|null                                                                                 $record
+     * @param array<string,mixed>                                                                                 $values
      *
      * @return list<array{name: string, index: int, fields: list<array<string,mixed>>}>
      */
-    private static function tabs(array $fields, ?object $record): array
+    private static function tabs(array $fields, array $values): array
     {
         $grouped = array();
 
@@ -259,7 +612,7 @@ final class FormController
                 'name'   => (string) $name,
                 /* Only has to be unique inside this page — it feeds the `id`/`aria-controls` pair. */
                 'index'  => $index++,
-                'fields' => self::controls($group, $record),
+                'fields' => self::controls($group, $values),
             );
         }
 
@@ -275,19 +628,17 @@ final class FormController
      * wrong type reaching Twig is a runtime error on the page nobody tested with that field.
      *
      * @param list<array{property: string, label: string, widget: array<string,mixed>}> $fields
-     * @param object|null                                                               $record
+     * @param array<string,mixed>                                                               $values
      *
      * @return list<array<string,mixed>>
      */
-    private static function controls(array $fields, ?object $record): array
+    private static function controls(array $fields, array $values): array
     {
         $controls = array();
 
         foreach ($fields as $field) {
             $widget = $field['widget'];
-            $raw    = $record === null
-                ? ($widget['default'] ?? null)
-                : ($record->{$field['property']} ?? null);
+            $raw    = $values[$field['property']] ?? null;
 
             $controls[] = array(
                 'property'  => $field['property'],

@@ -30,10 +30,14 @@
     NO ADDRESS IS BUILT HERE. `action`, `listUrl` and the prefix behind them come from the
     controller, as in the list view.
 
-    SAVING IS STORY 002-006-0004. The form carries its `action` and its submit button already,
-    because both belong to the shape of the page; the route answers a POST with 405 until that
-    story adds the branch. The CSRF token field goes in there too — it is a promise ADR 0010
-    assigned to this story, and a token rendered before anything checks it would be theatre.
+    THE TOKEN FIELD IS NOT OPTIONAL. `FormController::save()` verifies it before it speaks to
+    the core at all, so a form rendered without it cannot be saved. It is a hidden field plus a
+    cookie — `Auth\FormToken` — and the promise ADR 0010 assigned to this story.
+
+    THE ERROR SITS ABOVE THE FORM FOR NOW, announced with `role="alert"` the way the sign-in
+    mask does it. Putting it at the field that caused it is story 002-006-0005: the core names
+    no field, and the one encapsulated place that guesses it from the message text is settled in
+    ADR 0014. Until then the finding is shown raw rather than swallowed.
 #}{% extends 'layout.html.twig' %}
 
 {% macro field(field) %}
@@ -75,10 +79,15 @@
 
     <p class="admin-form__back"><a href="{{ listUrl }}">Zurück zur Liste</a></p>
 
+{% if error %}
+    <p class="admin-form__error" role="alert">{{ error }}</p>
+{% endif %}
+
 {% if tabs is empty %}
     <p class="admin__hint">Diese Entität hat keine bearbeitbaren Felder.</p>
 {% else %}
     <form class="admin-form" method="post" action="{{ action }}">
+        <input type="hidden" name="{{ tokenField }}" value="{{ token }}">
 {% if tabs|length > 1 %}
         <div class="admin-form__tabs" data-controller="admin-tabs">
             <div class="admin-form__tablist" role="tablist" aria-label="Feldgruppen">
