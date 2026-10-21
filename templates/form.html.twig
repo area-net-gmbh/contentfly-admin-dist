@@ -13,6 +13,20 @@
     `display` is the honest answer for a relation, a file or a permission matrix: the value is
     shown and not offered, so nothing can be saved that this package cannot yet form.
 
+    THE TABS COME FROM THE `tab` ATTRIBUTE (002-006-0003, ADR 0015), already grouped. One group
+    renders without a bar, which is what every entity that states no tab looks like.
+
+    SWITCHING IS CLIENT-SIDE, AND THAT IS NOT A PREFERENCE. Sorting and paging in the list are
+    plain links because their state belongs in the URL; a tab must not be, because the form
+    holds unsaved input and a server round trip would throw it away. The Stimulus controller is
+    declared by the controller only when there is more than one group.
+
+    IT ALSO HAS TO WORK WITHOUT THE CONTROLLER. Every panel is visible until the controller
+    hides the inactive ones on connect — the opposite order would leave a form with one
+    reachable group if the module failed to load, and a form that silently shows two thirds of
+    its fields is worse than one with no tabs at all. For the same reason the buttons are
+    `type="button"`: inside a form a bare button submits it.
+
     NO ADDRESS IS BUILT HERE. `action`, `listUrl` and the prefix behind them come from the
     controller, as in the list view.
 
@@ -22,19 +36,7 @@
     assigned to this story, and a token rendered before anything checks it would be theatre.
 #}{% extends 'layout.html.twig' %}
 
-{% block bodyAttributes %} class="admin"{% endblock %}
-
-{% block content %}
-<main class="admin__main">
-    <h1>{{ entity }}{% if isNew %} — neuer Datensatz{% endif %}</h1>
-
-    <p class="admin-form__back"><a href="{{ listUrl }}">Zurück zur Liste</a></p>
-
-{% if fields is empty %}
-    <p class="admin__hint">Diese Entität hat keine bearbeitbaren Felder.</p>
-{% else %}
-    <form class="admin-form" method="post" action="{{ action }}">
-{% for field in fields %}
+{% macro field(field) %}
         <div class="admin-form__field">
 {% if field.control == 'checkbox' %}
             <label class="admin-form__label admin-form__label--inline" for="field-{{ field.property }}">
@@ -62,7 +64,41 @@
 {% endif %}
 {% endif %}
         </div>
+{% endmacro %}
+
+{% block bodyAttributes %} class="admin"{% endblock %}
+
+{% block content %}
+{% import _self as form %}
+<main class="admin__main">
+    <h1>{{ entity }}{% if isNew %} — neuer Datensatz{% endif %}</h1>
+
+    <p class="admin-form__back"><a href="{{ listUrl }}">Zurück zur Liste</a></p>
+
+{% if tabs is empty %}
+    <p class="admin__hint">Diese Entität hat keine bearbeitbaren Felder.</p>
+{% else %}
+    <form class="admin-form" method="post" action="{{ action }}">
+{% if tabs|length > 1 %}
+        <div class="admin-form__tabs" data-controller="admin-tabs">
+            <div class="admin-form__tablist" role="tablist" aria-label="Feldgruppen">
+{% for tab in tabs %}
+                <button class="admin-form__tab" type="button" role="tab" id="tab-{{ tab.index }}" aria-controls="panel-{{ tab.index }}" aria-selected="{{ loop.first ? 'true' : 'false' }}" data-admin-tabs-target="tab" data-action="click->admin-tabs#select keydown->admin-tabs#key">{{ tab.name }}</button>
 {% endfor %}
+            </div>
+{% for tab in tabs %}
+            <section class="admin-form__panel" role="tabpanel" id="panel-{{ tab.index }}" aria-labelledby="tab-{{ tab.index }}" data-admin-tabs-target="panel">
+{% for field in tab.fields %}
+{{ form.field(field) }}
+{% endfor %}
+            </section>
+{% endfor %}
+        </div>
+{% else %}
+{% for field in tabs[0].fields %}
+{{ form.field(field) }}
+{% endfor %}
+{% endif %}
 
         <div class="admin-form__actions">
             <button class="admin-form__submit" type="submit">{% if isNew %}Anlegen{% else %}Speichern{% endif %}</button>

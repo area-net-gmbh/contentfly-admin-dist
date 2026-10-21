@@ -47,6 +47,18 @@ final class FormController
 
 
     /**
+     * The tab that holds every field whose entity states no `tab` (002-006-0003).
+     *
+     * `Attribute\Admin` originally described such a field as staying "outside the tab
+     * structure" — rendered above the bar and always visible. Collected into one tab instead,
+     * because on a real entity the untabbed fields are the *majority*: `Harness\Feldtyp` states
+     * a tab on three of fifteen, and a bar holding the minority above twelve loose fields reads
+     * as a broken layout rather than a deliberate one. The attribute's own wording was corrected
+     * with this task.
+     */
+    private const DEFAULT_TAB = 'Allgemein';
+
+    /**
      * Which HTML control a widget key gets in stage 1.
      *
      * THE ONE PLACE THIS DECISION LIVES, and the one story 002-007 replaces. The widget keys are
@@ -155,6 +167,7 @@ final class FormController
         }
 
         $fields = $this->app[EntityView::CONTAINER_KEY]->formFields($name);
+        $tabs   = self::tabs($fields, $record);
         $base   = $manager->getPrefix().'/form/'.MenuBuilder::entityToUrl($name);
 
         $html = $this->app[TemplateRenderer::CONTAINER_KEY]->render('form.html.twig', array(
@@ -167,7 +180,14 @@ final class FormController
             'isNew'      => $id === null,
             'listUrl'    => $manager->getPrefix().'/list/'.MenuBuilder::entityToUrl($name),
             'action'     => $id === null ? $base : $base.'/'.rawurlencode($id),
-            'fields'     => self::controls($fields, $record),
+            'tabs'       => $tabs,
+            /*
+             * THE LAYOUT LOADS STIMULUS ONLY WHERE A VIEW ASKS FOR IT, and this view only needs
+             * it when there is something to switch between. Deciding that here rather than in
+             * the template keeps the template free of logic, the same split the field controls
+             * already follow.
+             */
+            'controllers' => count($tabs) > 1 ? array('admin-tabs' => 'admin/tabs') : array(),
         ));
 
         return new Response($html, 200, array('Content-Type' => 'text/html; charset=UTF-8'));
@@ -193,6 +213,57 @@ final class FormController
         $configured = Language::configured();
 
         return $configured[0] ?? null;
+    }
+
+    /**
+     * The fields grouped into tabs, in the order the form shows them.
+     *
+     * THE DEFAULT TAB COMES FIRST, then every stated tab in the order its first field appears in
+     * the schema. Sorting the tabs by name would reorder a form whenever somebody renames a tab,
+     * and `position` — the attribute that *is* about order — belongs to story 002-008.
+     *
+     * ONE TAB MEANS NO TABS. An entity that states none, which is every entity until a project
+     * writes the attribute, comes out as a single group and the template then renders no bar at
+     * all — so this task changes nothing for an unshaped entity.
+     *
+     * @param list<array{property: string, label: string, tab: string|null, widget: array<string,mixed>}> $fields
+     * @param object|null                                                                                 $record
+     *
+     * @return list<array{name: string, index: int, fields: list<array<string,mixed>>}>
+     */
+    private static function tabs(array $fields, ?object $record): array
+    {
+        $grouped = array();
+
+        foreach ($fields as $field) {
+            $grouped[$field['tab'] ?? self::DEFAULT_TAB][] = $field;
+        }
+
+        /*
+         * The default group goes first if it exists at all. Written as a two-step merge rather
+         * than a sort, because `+` on arrays keeps the right-hand side's order for every other
+         * key — which is the schema order the grouping above produced.
+         */
+        $ordered = array();
+
+        if (isset($grouped[self::DEFAULT_TAB])) {
+            $ordered[self::DEFAULT_TAB] = $grouped[self::DEFAULT_TAB];
+            unset($grouped[self::DEFAULT_TAB]);
+        }
+
+        $tabs  = array();
+        $index = 0;
+
+        foreach ($ordered + $grouped as $name => $group) {
+            $tabs[] = array(
+                'name'   => (string) $name,
+                /* Only has to be unique inside this page — it feeds the `id`/`aria-controls` pair. */
+                'index'  => $index++,
+                'fields' => self::controls($group, $record),
+            );
+        }
+
+        return $tabs;
     }
 
     /**

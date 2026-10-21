@@ -423,3 +423,48 @@ li {
     text-align: right;
     white-space: nowrap;
 }
+
+/*
+ * The form's field groups (002-006-0003).
+ *
+ * THE INACTIVE PANEL IS HIDDEN BY THE `hidden` ATTRIBUTE, not by a class of this stylesheet —
+ * the Stimulus controller sets it on connect. Nothing here hides a panel, so a form whose
+ * module failed to load shows all of its fields instead of one group and no hint of the rest.
+ */
+
+.admin-form__tablist {
+    display: flex;
+    gap: 0.25rem;
+    margin-bottom: 1.25rem;
+    border-bottom: 1px solid var(--admin-rule);
+}
+
+.admin-form__tab {
+    padding: 0.5rem 1rem;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    font: inherit;
+    color: var(--admin-muted);
+    background: none;
+    cursor: pointer;
+}
+
+.admin-form__tab:hover {
+    color: var(--admin-text);
+}
+
+/*
+ * The selected tab is marked off its own ARIA state, so what a screen reader announces and what
+ * the eye sees can never disagree — a second class for the same fact is a second thing to keep
+ * in step.
+ */
+.admin-form__tab[aria-selected="true"] {
+    border-bottom-color: var(--admin-accent);
+    color: var(--admin-text);
+    font-weight: 600;
+}
+
+.admin-form__tab:focus-visible {
+    outline: 2px solid var(--admin-accent);
+    outline-offset: -2px;
+}

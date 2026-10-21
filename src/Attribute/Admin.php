@@ -56,7 +56,9 @@ final class Admin
      *                                Gaps are intended — leave room to insert later. Null means
      *                                the field keeps the order the schema delivers it in.
      * @param string|null $tab        Name of the form tab this field belongs to. Fields without a
-     *                                tab stay outside the tab structure.
+     *                                tab are collected into one default tab, which comes first;
+     *                                an entity that states no tab at all gets a form without a
+     *                                tab bar (`Controller\FormController`, story 002-006-0003).
      * @param bool|null   $readonly   Show the value, do not let it be edited.
      * @param bool|null   $hide       Keep the field out of the admin entirely. It stays in the
      *                                API and in the database; this hides it from the interface.

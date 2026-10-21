@@ -41,6 +41,7 @@ final class Importmap
         '@hotwired/stimulus' => 'vendor/stimulus-3.2.2.js',
         '@hotwired/turbo'    => 'vendor/turbo-8.0.23.js',
         'admin/hello'        => 'controllers/hello_controller.js',
+        'admin/tabs'         => 'controllers/tabs_controller.js',
     );
 
     /**

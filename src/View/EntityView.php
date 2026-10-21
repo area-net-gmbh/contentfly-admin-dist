@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Areanet\ContentflyAdmin\View;
 
 use Areanet\ContentflyAdmin\Schema\SchemaClient;
+use Areanet\ContentflyAdmin\Schema\ShapingListener;
 
 /**
  * One entity's schema entry turned into a list definition and a form definition.
@@ -91,9 +92,16 @@ final class EntityView
      * reason `ColumnBuilder::build()` yields the id column: the callers have already checked
      * their input against `AdminManager::getEntities()`.
      *
+     * THIS IS THE FIRST READER OF `contentflyAdmin` IN THE PACKAGE (002-006-0003). ADR 0013 §4
+     * said stage 1 does not read it; ADR 0015 narrows that to the `WidgetResolver`, because
+     * `tab`, `readonly` and `hide` decide the *structure* of the form and retrofitting them
+     * would mean cutting the form template twice. The remaining attributes — `label`,
+     * `showInList`, `position`, `isFilterable`, `accept` — and the whole list side stay with
+     * story 002-008, which is why the label here is still the humanised property name.
+     *
      * @param string $entity Entity name as the schema spells it
      *
-     * @return list<array{property: string, label: string, widget: array<string,mixed>}>
+     * @return list<array{property: string, label: string, tab: string|null, widget: array<string,mixed>}>
      */
     public function formFields(string $entity): array
     {
@@ -107,14 +115,64 @@ final class EntityView
                 continue;
             }
 
+            $shaping = self::shaping($meta);
+
+            /*
+             * `hide` DROPS THE FIELD, it does not merely mark it. The attribute says "keep this
+             * out of the admin entirely" (`Attribute\Admin`), and a field rendered and then
+             * hidden by a stylesheet is still in the page source and still submitted.
+             */
+            if (($shaping['hide'] ?? null) === true) {
+                continue;
+            }
+
+            $widget = $this->widgetResolver->resolve($entity, $property, $meta);
+
+            /*
+             * THE ATTRIBUTE ONLY EVER ADDS WRITE PROTECTION. A stated `readonly: false` is not
+             * honoured here, and that is deliberate: the resolver sets `readonly` for a
+             * `virtualjoin`, whose value the core computes, and for a type this package does not
+             * know — in both cases the field cannot be written correctly, which no attribute on
+             * an entity can change. Lifting that is what a registered project widget is for
+             * (ADR 0013), not an annotation.
+             */
+            if (($shaping['readonly'] ?? null) === true) {
+                $widget['readonly'] = true;
+            }
+
+            $tab = $shaping['tab'] ?? null;
+
             $fields[] = array(
                 'property' => $property,
                 'label'    => ColumnBuilder::humanise($property),
-                'widget'   => $this->widgetResolver->resolve($entity, $property, $meta),
+                'tab'      => is_string($tab) && $tab !== '' ? $tab : null,
+                'widget'   => $widget,
             );
         }
 
         return $fields;
+    }
+
+    /**
+     * What this package's own attributes state about one field, or an empty map.
+     *
+     * The listener writes only the arguments an entity actually stated and leaves everything
+     * else out (`Schema\ShapingListener`), so an absent key means "not stated" and never
+     * "stated false". Reading it through one helper keeps that assumption in one place.
+     *
+     * @param array<string,mixed>|mixed $meta The field's schema entry
+     *
+     * @return array<string,mixed>
+     */
+    private static function shaping($meta): array
+    {
+        if (!is_array($meta)) {
+            return array();
+        }
+
+        $shaping = $meta[ShapingListener::SCHEMA_KEY] ?? null;
+
+        return is_array($shaping) ? $shaping : array();
     }
 
     /**
