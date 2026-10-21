@@ -112,6 +112,13 @@ final class FormController
         'filelist'         => false,
         'permissionmatrix' => false,
         'readonly'         => false,
+        /*
+         * `search` IS A RENDERING VARIANT, NOT A SEVENTEENTH WIDGET KEY. The four relation keys
+         * all collapse onto it above `RelationOptions::LIMIT` target records, because none of
+         * them can be drawn as a list there — one file with a search box beats the same `if`
+         * written into four fragments (002-007-0007).
+         */
+        'search'           => true,
     );
 
     /**
@@ -203,7 +210,7 @@ final class FormController
          * it may be written at all. The method check sits above this so a HEAD or PUT does not
          * pay for the queries.
          */
-        $prepared = $this->prepare($request, $fields);
+        $prepared = $this->prepare($request, $name, $fields);
 
         if ($request->isMethod('POST')) {
             return $this->save($request, $name, $id, $language, $fields, $prepared);
@@ -510,7 +517,10 @@ final class FormController
         foreach ($prepared as $field) {
             if ($field['fragment'] === RichText::WIDGET) {
                 $controllers['admin-rte'] = 'admin/rte';
-                break;
+            }
+
+            if ($field['fragment'] === 'search') {
+                $controllers['admin-search'] = 'admin/search';
             }
         }
 
@@ -561,11 +571,21 @@ final class FormController
              * emptying a relation impossible: the absent key would be taken for "unchanged" and
              * the last choice could never be removed.
              */
-            if (in_array($fragment, self::LIST_FRAGMENTS, true)) {
+            if ($prepared[$property]['list'] ?? false) {
                 $value = $submitted[$property] ?? array();
 
+                /*
+                 * A COMMA-SEPARATED STRING IS THE NO-JAVASCRIPT FORM. The search fragment falls
+                 * back to one plain text field when its module does not load, and one field
+                 * cannot post an array — so it posts the ids separated by commas, and this is
+                 * where that becomes a list again.
+                 */
+                if (is_string($value)) {
+                    $value = $value === '' ? array() : explode(',', $value);
+                }
+
                 $data[$property] = is_array($value)
-                    ? array_values(array_filter($value, 'is_string'))
+                    ? array_values(array_filter(array_map('trim', array_filter($value, 'is_string'))))
                     : array();
                 continue;
             }
@@ -643,8 +663,12 @@ final class FormController
                 continue;
             }
 
-            if (in_array($fragment, self::LIST_FRAGMENTS, true)) {
+            if ($prepared[$property]['list'] ?? false) {
                 $value = $submitted[$property] ?? array();
+
+                if (is_string($value)) {
+                    $value = $value === '' ? array() : explode(',', $value);
+                }
 
                 $values[$property] = is_array($value) ? array_values($value) : array();
                 continue;
@@ -780,6 +804,8 @@ final class FormController
                 'value'     => self::value($raw, $fragment),
                 /* Only the list fragments read this; for every other one the template ignores it. */
                 'values'    => self::selected($raw),
+                'list'      => $prepared[$property]['list'] ?? false,
+                'searchUrl' => $prepared[$property]['search'] ?? null,
                 'checked'   => self::checked($raw),
                 'error'     => $errors[$property] ?? null,
             );
@@ -848,33 +874,60 @@ final class FormController
      *
      * @return array<string,array{fragment: string, options: list<array{value: string, label: string}>}>
      */
-    private function prepare(Request $request, array $fields): array
+    private function prepare(Request $request, string $name, array $fields): array
     {
         $provider = $this->app[RelationOptions::CONTAINER_KEY];
+
+        /*
+         * THE ADDRESS IS BUILT HERE AND NOT IN THE TEMPLATE, like every other address of this
+         * package: the prefix belongs to the project and `MenuBuilder` owns the spelling of an
+         * entity in a URL (ADR 0011).
+         */
+        $options = $this->app[AdminManager::CONTAINER_KEY]->getPrefix()
+            .'/options/'.MenuBuilder::entityToUrl($name);
+
         $prepared = array();
 
         foreach ($fields as $field) {
             $widget   = $field['widget'];
             $fragment = self::fragment($widget);
-            $options  = self::options($widget);
+            $choices  = self::options($widget);
+            $search   = null;
+
+            /*
+             * THE LIST-NESS IS DECIDED BEFORE THE FRAGMENT CAN CHANGE. A field that posts
+             * several values keeps doing so when it turns into a search box, and the save path
+             * reads this flag rather than the fragment name — otherwise the switch below would
+             * quietly turn a multi-value field into a single-value one.
+             */
+            $list = in_array($fragment, self::LIST_FRAGMENTS, true);
 
             if (in_array($fragment, self::RELATION_FRAGMENTS, true)) {
                 $relation = $provider->forField($widget, $request);
 
-                /*
-                 * MORE TARGET RECORDS THAN A LIST MAY OFFER IS SHOWN, NOT TRUNCATED. A list cut
-                 * off at the limit would hide records without saying so, and an editor would
-                 * conclude the missing one does not exist. The search for that case is task
-                 * 002-007-0007; until then the honest answer is the value without a control.
-                 */
-                if ($relation === null || $relation['total'] > RelationOptions::LIMIT) {
+                if ($relation === null) {
+                    /* No target, no such entity, nothing in it, or not readable — all the same. */
                     $fragment = 'readonly';
+                } elseif ($relation['total'] > RelationOptions::LIMIT) {
+                    /*
+                     * MORE TARGET RECORDS THAN A LIST MAY OFFER IS SEARCHED, NOT TRUNCATED. A
+                     * list cut off at the limit would hide records without saying so, and an
+                     * editor would conclude the missing one does not exist (ADR 0016 §2).
+                     */
+                    $fragment = 'search';
+                    $choices  = array();
+                    $search   = $options.'/'.rawurlencode($field['property']);
                 } else {
-                    $options = $relation['options'];
+                    $choices = $relation['options'];
                 }
             }
 
-            $prepared[$field['property']] = array('fragment' => $fragment, 'options' => $options);
+            $prepared[$field['property']] = array(
+                'fragment' => $fragment,
+                'options'  => $choices,
+                'list'     => $list,
+                'search'   => $search,
+            );
         }
 
         return $prepared;

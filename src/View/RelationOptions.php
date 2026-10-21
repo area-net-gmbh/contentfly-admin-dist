@@ -72,6 +72,64 @@ final class RelationOptions
      */
     public function forField(array $widget, Request $request): ?array
     {
+        $prepared = $this->describe($widget);
+
+        if ($prepared === null) {
+            return null;
+        }
+
+        [$name, $label, $where] = $prepared;
+
+        return $this->query($name, $label, $where, $request);
+    }
+
+    /**
+     * The matches for a search term in one relation field — the other half of ADR 0016 §2.
+     *
+     * THE CORE'S OWN `fulltext` DOES THE SEARCHING, and that is not laziness. It escapes `%`,
+     * `_` and `\` in the term before it reaches the LIKE pattern (`Api.php:1452`, fixed there
+     * under 015-000-0012 because an unescaped `_` lets a caller ask whether the sixth character
+     * is an `x`), and it skips properties the schema marks `secret`. Writing the pattern here
+     * would mean repeating both of those correctly, and getting the first one wrong is silent.
+     *
+     * IT SEARCHES EVERY TEXT PROPERTY OF THE TARGET, not only the label — deviating from the
+     * task's own wording, and in the editor's favour: the term someone types is as likely to sit
+     * in a description as in a title, and a search that only looks at the label answers "nothing
+     * found" for a record that is plainly there.
+     *
+     * @return array{options: list<array{value: string, label: string}>, total: int}|null
+     */
+    public function search(array $widget, string $query, Request $request): ?array
+    {
+        if (trim($query) === '') {
+            return null;
+        }
+
+        $prepared = $this->describe($widget);
+
+        if ($prepared === null) {
+            return null;
+        }
+
+        [$name, $label, $where] = $prepared;
+
+        $where = ($where ?? array()) + array('fulltext' => $query);
+
+        return $this->query($name, $label, $where, $request);
+    }
+
+    /**
+     * Entity name, label property and base filter of one relation field, or `null`.
+     *
+     * The part `forField()` and `search()` have in common, kept in one place because the two
+     * must not disagree about which entity a field points at or which group it is restricted to.
+     *
+     * @param array<string,mixed> $widget
+     *
+     * @return array{0: string, 1: string|null, 2: array<string,mixed>|null}|null
+     */
+    private function describe(array $widget): ?array
+    {
         $target = $widget['target'] ?? null;
 
         if (!is_string($target) || $target === '') {
@@ -98,12 +156,25 @@ final class RelationOptions
          * `checkbox` AND `radio` POINT AT ONE GROUP OF A SHARED TABLE. Both accept `PIM\Option`,
          * where every option of every group lives; without this filter a field would offer the
          * options of every other field as well. `getList()` takes the group as an ordinary
-         * `where` over the `join` property (`Api.php:1392`).
+         * `where` over the `join` property (`Api.php:1392`), and a caller of the search route
+         * cannot widen it — the group is read here, from the schema, never from the request.
          */
         $where = isset($widget['group']) && is_string($widget['group'])
             ? array('group' => $widget['group'])
             : null;
 
+        return array($name, $label, $where);
+    }
+
+    /**
+     * One list query against the core, turned into options.
+     *
+     * @param array<string,mixed>|null $where
+     *
+     * @return array{options: list<array{value: string, label: string}>, total: int}|null
+     */
+    private function query(string $name, ?string $label, ?array $where, Request $request): ?array
+    {
         try {
             $result = (new Api($this->app, $request))->getList(
                 $name,

@@ -11,6 +11,7 @@ use Areanet\ContentflyAdmin\Command\PublishAssetsCommand;
 use Areanet\ContentflyAdmin\Controller\AssetController;
 use Areanet\ContentflyAdmin\Controller\FormController;
 use Areanet\ContentflyAdmin\Controller\ListController;
+use Areanet\ContentflyAdmin\Controller\OptionsController;
 use Areanet\ContentflyAdmin\Schema\SchemaClient;
 use Areanet\ContentflyAdmin\Schema\ShapingListener;
 use Areanet\ContentflyAdmin\Schema\VersionGuard;
@@ -389,6 +390,19 @@ final class AdminManager
             ->mount($this->prefix.'/form', FormController::class)
             ->match('{entity}', true, 'formAction')
             ->match('{entity}/{id}', true, 'formAction');
+
+        /*
+         * THE OPTIONS SEARCH GETS A MOUNT OF ITS OWN, like the list and the form. The address is
+         * `<entity>/<property>` and carries no entity class, no group and no label — all three
+         * are derived from the schema inside the controller, so this cannot be used as a general
+         * query interface (002-007-0007).
+         *
+         * `isSecure = true`: the search reads records through `Api::getList()`, which asks
+         * `Permission::isReadable()` about `auth.user`.
+         */
+        $this->app['routeManager']
+            ->mount($this->prefix.'/options', OptionsController::class)
+            ->get('{entity}/{property}', true, 'optionsAction');
 
         $this->app['routeManager']
             ->mount($this->prefix.'/_asset', AssetController::class)

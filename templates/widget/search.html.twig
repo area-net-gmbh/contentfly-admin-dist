@@ -1,0 +1,25 @@
+{#
+    A relation with more target records than a list may offer — searched instead of listed
+    (002-007-0007, ADR 0016 §2).
+
+    ONE FRAGMENT FOR ALL FOUR RELATION KEYS. Above the limit none of them can be drawn as a list,
+    so `entity`, `entitylist`, `radio` and `checkboxgroup` all arrive here; whether one value or
+    several may be chosen is `field.list`, decided in PHP before the fragment was picked. A
+    rendering variant, not a seventeenth widget key.
+
+    THE PLAIN TEXT FIELD IS THE FIELD, the search box is an overlay — the same stance as rich
+    text and the tabs. Without the module an editor sees the ids and can still paste one in,
+    which is unlovely and works; a field that needs JavaScript to be editable at all would be a
+    step back from the plain display it replaces. For a multi-value field the ids are separated
+    by commas, because one text field cannot post an array, and `FormController::payload()` turns
+    that back into a list.
+
+    THE CURRENT VALUE IS SHOWN AS AN ID AND NOT AS A NAME. Looking the name up would be one query
+    per field per form render, for a field whose target table is by definition large — and the
+    search box resolves it the moment somebody types. That is the trade this fragment accepts.
+#}
+{% include 'widget/_label.html.twig' %}
+            <div class="admin-form__search" data-controller="admin-search" data-admin-search-url-value="{{ field.searchUrl }}" data-admin-search-multiple-value="{{ field.list ? 'true' : 'false' }}" data-admin-search-field-value="field-{{ field.property }}">
+                <input class="admin-form__control" type="text" id="field-{{ field.property }}" name="{{ field.property }}" value="{{ field.list ? field.values|join(',') : field.value }}" data-admin-search-target="source" autocomplete="off"{% if field.required %} required{% endif %}{% if field.error %} aria-invalid="true" aria-describedby="{{ described }}"{% endif %}>
+                <p class="admin-form__hint" data-admin-search-target="note">Diese Datenart hat zu viele Datensätze für eine Auswahlliste — tippen Sie, um zu suchen.</p>
+            </div>

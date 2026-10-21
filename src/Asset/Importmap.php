@@ -43,6 +43,7 @@ final class Importmap
         'admin/hello'        => 'controllers/hello_controller.js',
         'admin/tabs'         => 'controllers/tabs_controller.js',
         'admin/rte'          => 'controllers/rte_controller.js',
+        'admin/search'       => 'controllers/search_controller.js',
     );
 
     /**
