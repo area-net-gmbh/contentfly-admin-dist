@@ -624,13 +624,14 @@ final class FormController
         $controls = array();
 
         foreach ($fields as $field) {
-            $widget = $field['widget'];
-            $raw    = $values[$field['property']] ?? null;
+            $widget   = $field['widget'];
+            $raw      = $values[$field['property']] ?? null;
+            $fragment = self::fragment($widget);
 
             $controls[] = array(
                 'property'  => $field['property'],
                 'label'     => $field['label'],
-                'widget'    => self::fragment($widget),
+                'widget'    => $fragment,
                 /*
                  * THE CORE ALIAS GOES ALONG because three of them share one widget key:
                  * `number` has to know whether it is looking at an `integer` or at a `decimal`,
@@ -640,7 +641,7 @@ final class FormController
                 'required'  => ($widget['required'] ?? false) === true,
                 'maxlength' => $widget['maxlength'] ?? null,
                 'options'   => self::options($widget),
-                'value'     => self::value($raw),
+                'value'     => self::value($raw, $fragment),
                 'checked'   => self::checked($raw),
                 'error'     => $errors[$field['property']] ?? null,
             );
@@ -734,9 +735,9 @@ final class FormController
      * One value as the form prints it.
      *
      * `toValueObject()` DOES NOT ANSWER SCALARS THROUGHOUT — a `datetime` arrives as an array of
-     * `LOCAL`, `LOCAL_TIME` and `ISO8601` (`Types/DatetimeType.php`). `LOCAL` is taken because it
-     * is the form the browser's `datetime-local` control expects, and the same reasoning applies
-     * to the list's cells.
+     * `LOCAL`, `LOCAL_TIME`, `ISO8601` and `TIMESTAMP` (`Types/DatetimeType.php`), and which of
+     * them is right depends on where the value is going. `datetime()` answers that; the fragment
+     * is passed in for no other reason.
      *
      * ANYTHING THIS CANNOT FORM BECOMES THE EMPTY STRING, never the placeholder dash. The dash
      * belongs to the display case and the template puts it there; reaching an input it would be
@@ -744,7 +745,7 @@ final class FormController
      *
      * @param mixed $value
      */
-    private static function value($value): string
+    private static function value($value, string $fragment): string
     {
         if ($value === null || $value === '') {
             return '';
@@ -755,12 +756,47 @@ final class FormController
         }
 
         if (is_array($value)) {
-            $local = $value['LOCAL'] ?? null;
-
-            return is_scalar($local) ? (string) $local : '';
+            return self::datetime($value, $fragment);
         }
 
         return is_scalar($value) ? (string) $value : '';
+    }
+
+    /**
+     * A `datetime` in the form the destination needs — and the two forms are not the same one.
+     *
+     * `LOCAL` IS `d.m.Y`, WHICH IS NEITHER. That is the finding this method exists for: the core
+     * answers `LOCAL` as a German date *without a time* (`Types/DatetimeType.php:52`), and the
+     * previous version of this code put it straight into the `value` of a `datetime-local`
+     * input. Such a value is invalid per the HTML specification, so the browser rendered the
+     * field EMPTY — and saving that form wrote the empty value back. The date was deleted by
+     * opening and saving a record, which is as quiet as data loss gets. Nobody saw it because
+     * `created` and `modified` are the only `datetime` fields on an inherited entity and both
+     * are filtered out of the form; the harness had no editable one until 002-007-0003 added it.
+     *
+     * AN INPUT THEREFORE GETS `ISO8601`, CUT TO THE MINUTE. `datetime-local` wants
+     * `YYYY-MM-DDTHH:MM`, and ISO 8601 is fixed width up to exactly that point, so the first 16
+     * characters are it — no parsing, no locale, no second format to keep in step. Writing back
+     * is already safe: the core hands the submitted string to `new \DateTime()`, which reads
+     * that form natively.
+     *
+     * A DISPLAY GETS THE GERMAN FORM, and `LOCAL_TIME` rather than `LOCAL`, because a record
+     * carries a time and dropping it from the display makes two different timestamps look
+     * identical.
+     *
+     * @param array<string,mixed> $value
+     */
+    private static function datetime(array $value, string $fragment): string
+    {
+        if ($fragment === 'datetime') {
+            $iso = $value['ISO8601'] ?? null;
+
+            return is_string($iso) && strlen($iso) >= 16 ? substr($iso, 0, 16) : '';
+        }
+
+        $human = $value['LOCAL_TIME'] ?? $value['LOCAL'] ?? null;
+
+        return is_scalar($human) ? (string) $human : '';
     }
 
     /**
