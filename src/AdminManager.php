@@ -9,6 +9,7 @@ use Areanet\ContentflyAdmin\Auth\LoginScreen;
 use Areanet\ContentflyAdmin\Controller\AdminController;
 use Areanet\ContentflyAdmin\Command\PublishAssetsCommand;
 use Areanet\ContentflyAdmin\Controller\AssetController;
+use Areanet\ContentflyAdmin\Controller\FormController;
 use Areanet\ContentflyAdmin\Controller\ListController;
 use Areanet\ContentflyAdmin\Schema\SchemaClient;
 use Areanet\ContentflyAdmin\Schema\ShapingListener;
@@ -360,6 +361,29 @@ final class AdminManager
         $this->app['routeManager']
             ->mount($this->prefix.'/list', ListController::class)
             ->get('{entity}', true, 'listAction');
+
+        /*
+         * THE FORM GETS A MOUNT OF ITS OWN, like the list and for the same reason — one mount
+         * binds one controller class. Its own path segment under the prefix is ADR 0012.
+         *
+         * TWO ROUTES BECAUSE `{id?}` DOES NOT EXIST HERE. `mount()` hands back the provider for
+         * chaining and never the `RouteEntry`, so nothing reachable from a package can declare a
+         * placeholder optional or give it a default. `AssetController` below solves its three
+         * depths the same way.
+         *
+         * `match()` AND NOT `get()`, although story 002-006-0002 only answers GET: routes within
+         * one provider are keyed by their own name, so a `post()` written next to a `get()` on
+         * the same path would replace it instead of adding to it — silently. The POST branch of
+         * story 002-006-0004 therefore goes inside `formAction()`, not into a second line here.
+         *
+         * `isSecure = true`: the form reads a record and will write one, and both
+         * `Api::getSingle()` and the sub-request of ADR 0014 need the `auth.user` that only a
+         * guarded main request sets.
+         */
+        $this->app['routeManager']
+            ->mount($this->prefix.'/form', FormController::class)
+            ->match('{entity}', true, 'formAction')
+            ->match('{entity}/{id}', true, 'formAction');
 
         $this->app['routeManager']
             ->mount($this->prefix.'/_asset', AssetController::class)

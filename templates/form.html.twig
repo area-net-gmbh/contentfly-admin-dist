@@ -1,0 +1,73 @@
+{#
+    One record of one entity, as a form.
+
+    THE FIELDS ARRIVE READY TO RENDER. `FormController::controls()` has already decided which
+    control each field gets, whether it is editable at all, what its value prints as and whether
+    a checkbox is ticked — for the same reason the list formats its cells in PHP: a `datetime`
+    comes out of `toValueObject()` as an array, and a wrong type here is a runtime error on the
+    page nobody tested with that field.
+
+    `control` IS THE SWITCH, and its values are HTML controls, not ADR 0013's widget keys. The
+    mapping between the two is in `FormController::CONTROLS`, which is the single place story
+    002-007 replaces when it builds a real element for each of the 21 field types. Until then
+    `display` is the honest answer for a relation, a file or a permission matrix: the value is
+    shown and not offered, so nothing can be saved that this package cannot yet form.
+
+    NO ADDRESS IS BUILT HERE. `action`, `listUrl` and the prefix behind them come from the
+    controller, as in the list view.
+
+    SAVING IS STORY 002-006-0004. The form carries its `action` and its submit button already,
+    because both belong to the shape of the page; the route answers a POST with 405 until that
+    story adds the branch. The CSRF token field goes in there too — it is a promise ADR 0010
+    assigned to this story, and a token rendered before anything checks it would be theatre.
+#}{% extends 'layout.html.twig' %}
+
+{% block bodyAttributes %} class="admin"{% endblock %}
+
+{% block content %}
+<main class="admin__main">
+    <h1>{{ entity }}{% if isNew %} — neuer Datensatz{% endif %}</h1>
+
+    <p class="admin-form__back"><a href="{{ listUrl }}">Zurück zur Liste</a></p>
+
+{% if fields is empty %}
+    <p class="admin__hint">Diese Entität hat keine bearbeitbaren Felder.</p>
+{% else %}
+    <form class="admin-form" method="post" action="{{ action }}">
+{% for field in fields %}
+        <div class="admin-form__field">
+{% if field.control == 'checkbox' %}
+            <label class="admin-form__label admin-form__label--inline" for="field-{{ field.property }}">
+                <input class="admin-form__checkbox" type="checkbox" id="field-{{ field.property }}" name="{{ field.property }}" value="1"{% if field.checked %} checked{% endif %}>
+                {{ field.label }}
+            </label>
+{% else %}
+            <label class="admin-form__label" for="field-{{ field.property }}">{{ field.label }}{% if field.required %} <span class="admin-form__required" aria-hidden="true">*</span>{% endif %}</label>
+
+{% if field.control == 'display' %}
+            <p class="admin-form__display" id="field-{{ field.property }}">{{ field.value ?: '—' }}</p>
+{% elseif field.control == 'textarea' %}
+            <textarea class="admin-form__control" id="field-{{ field.property }}" name="{{ field.property }}" rows="6"{% if field.required %} required{% endif %}>{{ field.value }}</textarea>
+{% elseif field.control == 'select' %}
+            <select class="admin-form__control" id="field-{{ field.property }}" name="{{ field.property }}"{% if field.required %} required{% endif %}>
+{% if not field.required %}
+                <option value=""></option>
+{% endif %}
+{% for option in field.options %}
+                <option value="{{ option.value }}"{% if option.value == field.value %} selected{% endif %}>{{ option.label }}</option>
+{% endfor %}
+            </select>
+{% else %}
+            <input class="admin-form__control" type="{{ field.control }}" id="field-{{ field.property }}" name="{{ field.property }}" value="{{ field.value }}"{% if field.maxlength %} maxlength="{{ field.maxlength }}"{% endif %}{% if field.required %} required{% endif %}>
+{% endif %}
+{% endif %}
+        </div>
+{% endfor %}
+
+        <div class="admin-form__actions">
+            <button class="admin-form__submit" type="submit">{% if isNew %}Anlegen{% else %}Speichern{% endif %}</button>
+        </div>
+    </form>
+{% endif %}
+</main>
+{% endblock %}

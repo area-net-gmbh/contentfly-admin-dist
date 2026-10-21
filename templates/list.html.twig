@@ -16,7 +16,14 @@
 
     THE ADDRESSES ARE BUILT IN PHP, not here. `ListController` hands each column its `url` and
     its `ariaSort` ready-made, because assembling query strings in Twig means re-deciding in
-    the template which parameters exist — and the controller is where they are read.
+    the template which parameters exist — and the controller is where they are read. The same
+    holds for `row.editUrl` and `newUrl`, which story 002-006-0002 added.
+
+    THE ACTION CELL CARRIES ITS OWN CLASS, and that is load-bearing. `admin-list__cell` is what
+    `tools/harness-liste-pruefen.php` reads the table's values out of, in groups of one row's
+    worth — wrapping a value in a link or adding a seventh cell of that class would make the
+    gate read the wrong column. The action column is therefore `admin-list__action`, and its
+    head cell carries no `aria-sort`, which the same gate uses to find the sorted column.
 #}{% extends 'layout.html.twig' %}
 
 {% block bodyAttributes %} class="admin"{% endblock %}
@@ -24,6 +31,8 @@
 {% block content %}
 <main class="admin__main">
     <h1>{{ entity }}</h1>
+
+    <p class="admin-list__new"><a href="{{ newUrl }}">Neuer Datensatz</a></p>
 
 {% if rows is empty %}
     <p class="admin__hint">Für diese Entität gibt es noch keine Datensätze.</p>
@@ -36,14 +45,20 @@
                     <a class="admin-list__sort admin-list__sort--{{ column.ariaSort }}" href="{{ column.url }}">{{ column.label }}</a>
                 </th>
 {% endfor %}
+                <th scope="col" class="admin-list__action-head"></th>
             </tr>
         </thead>
         <tbody>
 {% for row in rows %}
             <tr class="admin-list__row">
 {% for column in columns %}
-                <td class="admin-list__cell">{{ row[column.property] }}</td>
+                <td class="admin-list__cell">{{ row.cells[column.property] }}</td>
 {% endfor %}
+                <td class="admin-list__action">
+{% if row.editUrl %}
+                    <a href="{{ row.editUrl }}">Bearbeiten</a>
+{% endif %}
+                </td>
             </tr>
 {% endfor %}
         </tbody>

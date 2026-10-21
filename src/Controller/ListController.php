@@ -7,6 +7,7 @@ namespace Areanet\ContentflyAdmin\Controller;
 use Areanet\ContentflyAdmin\AdminManager;
 use Areanet\ContentflyAdmin\Asset\Importmap;
 use Areanet\ContentflyAdmin\Schema\SchemaClient;
+use Areanet\ContentflyAdmin\View\ColumnBuilder;
 use Areanet\ContentflyAdmin\View\EntityView;
 use Areanet\ContentflyAdmin\View\MenuBuilder;
 use Areanet\ContentflyAdmin\View\TemplateRenderer;
@@ -132,8 +133,9 @@ final class ListController
         $pages = max(1, (int) ceil($total / self::ITEMS_PER_PAGE));
         $page  = min($page, $pages);
 
-        $base  = $manager->getPrefix().'/list/'.MenuBuilder::entityToUrl($name);
-        $query = array('lang' => Language::normalise($request->query->get('lang')));
+        $base     = $manager->getPrefix().'/list/'.MenuBuilder::entityToUrl($name);
+        $formBase = $manager->getPrefix().'/form/'.MenuBuilder::entityToUrl($name);
+        $query    = array('lang' => Language::normalise($request->query->get('lang')));
 
         /* `dir` only says something next to a `sort`; on its own it would be noise in the URL. */
         $order = $query + array('sort' => $sort, 'dir' => $sort === null ? null : strtolower($direction));
@@ -146,7 +148,8 @@ final class ListController
             'logoutUrl'  => $manager->getPrefix().'/logout',
             'entity'     => $name,
             'columns'    => self::sortableColumns($columns, $base, $query, $sort, $direction, $page),
-            'rows'       => self::rows($records, $columns),
+            'rows'       => self::rows($records, $columns, $formBase),
+            'newUrl'     => $formBase,
             'pagination' => array(
                 'page'    => $page,
                 'pages'   => $pages,
@@ -291,30 +294,42 @@ final class ListController
     }
 
     /**
-     * The records turned into printable cells, one map of property to string per row.
+     * The records turned into printable cells, plus the address of each record's form.
      *
      * THE FORMATTING HAPPENS HERE AND NOT IN TWIG. `toValueObject()` does not answer scalars
      * throughout: a `datetime` arrives as an array of `LOCAL`, `LOCAL_TIME` and `ISO8601`
      * (`Types/DatetimeType.php:43`), and printing that in a template is a runtime error in the
      * one place that is hardest to see coming. The template receives strings only.
      *
+     * THE EDIT ADDRESS IS BUILT HERE for the same reason the sort addresses are (002-006-0002):
+     * the template builds no URLs. It is `null` for a record without a usable id rather than a
+     * link to `/form/<Entity>/`, which is the create route and would offer a blank form where
+     * the reader expected the row they clicked.
+     *
      * @param list<object>                                 $records
      * @param list<array{property: string, label: string}> $columns
      *
-     * @return list<array<string,string>>
+     * @return list<array{cells: array<string,string>, editUrl: string|null}>
      */
-    private static function rows(array $records, array $columns): array
+    private static function rows(array $records, array $columns, string $formBase): array
     {
         $rows = array();
 
         foreach ($records as $record) {
-            $row = array();
+            $cells = array();
 
             foreach ($columns as $column) {
-                $row[$column['property']] = self::cell($record->{$column['property']} ?? null);
+                $cells[$column['property']] = self::cell($record->{$column['property']} ?? null);
             }
 
-            $rows[] = $row;
+            $id = $record->{ColumnBuilder::ID_PROPERTY} ?? null;
+
+            $rows[] = array(
+                'cells'   => $cells,
+                'editUrl' => is_scalar($id) && (string) $id !== ''
+                    ? $formBase.'/'.rawurlencode((string) $id)
+                    : null,
+            );
         }
 
         return $rows;

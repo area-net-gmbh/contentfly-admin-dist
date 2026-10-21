@@ -309,3 +309,117 @@ li {
 .admin-pager__state {
     color: var(--admin-muted);
 }
+
+/*
+ * The form view (002-006-0002).
+ *
+ * SCOPED TO `.admin-form*` AND `.admin-list__action*`, for the reason the sign-in mask states
+ * at the top of this file: a rule on bare `input`, `select` or `textarea` would reach into
+ * every view written after it, and story 002-007 is about to add fifteen more controls.
+ *
+ * ONE COLUMN, LABEL ABOVE CONTROL. Stage 1 has no layout information — which fields belong
+ * together is what the `tab` attribute answers, and reading it is story 002-006-0003. A
+ * two-column grid guessed here would have to be taken apart again the moment tabs arrive.
+ */
+
+.admin-form {
+    display: flex;
+    flex-direction: column;
+    max-width: 44rem;
+}
+
+.admin-form__back {
+    margin: 0 0 1.5rem;
+}
+
+.admin-form__field {
+    margin-bottom: 1.25rem;
+}
+
+.admin-form__label {
+    display: block;
+    margin-bottom: 0.25rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+/* The checkbox sits inside its own label, so that label must not be a block of its own. */
+.admin-form__label--inline {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 400;
+}
+
+/*
+ * The required marker is `aria-hidden` in the template: the control already carries `required`,
+ * which is what a screen reader announces. The asterisk is for the eye only, and saying it
+ * twice is worse than saying it once.
+ */
+.admin-form__required {
+    color: var(--admin-danger);
+}
+
+.admin-form__control {
+    width: 100%;
+    padding: 0.5rem 0.625rem;
+    border: 1px solid var(--admin-rule);
+    border-radius: 3px;
+    font: inherit;
+    color: inherit;
+    background: var(--admin-background);
+}
+
+.admin-form__control:focus-visible {
+    outline: 2px solid var(--admin-accent);
+    outline-offset: 1px;
+}
+
+/*
+ * A field that is shown and not offered — a relation, a file, a permission matrix, anything
+ * the schema marks `readonly`. It deliberately does not look like a disabled input: a greyed
+ * control invites clicking and suggests that something could unlock it. This is text.
+ */
+.admin-form__display {
+    margin: 0;
+    padding: 0.5rem 0;
+    color: var(--admin-muted);
+}
+
+.admin-form__actions {
+    margin-top: 0.5rem;
+}
+
+.admin-form__submit {
+    padding: 0.625rem 1.25rem;
+    border: 0;
+    border-radius: 3px;
+    font: inherit;
+    color: var(--admin-accent-contrast);
+    background: var(--admin-accent);
+    cursor: pointer;
+}
+
+.admin-form__submit:hover {
+    filter: brightness(var(--admin-hover-dim));
+}
+
+.admin-form__submit:focus-visible {
+    outline: 2px solid var(--admin-accent);
+    outline-offset: 2px;
+}
+
+/* The entry points between list and form. */
+
+.admin-list__new {
+    margin: 0 0 1rem;
+}
+
+.admin-list__action-head,
+.admin-list__action {
+    width: 1%;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--admin-rule);
+    text-align: right;
+    white-space: nowrap;
+}
