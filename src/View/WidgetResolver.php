@@ -39,6 +39,9 @@ namespace Areanet\ContentflyAdmin\View;
  *
  * - Seven types carry no `nullable` at all (gap L2'), so a required field is only ever reported
  *   when the schema says `nullable: false`. It is never inferred from the absence of the key.
+ *   Those seven are reachable through the entity's own `#[Admin(required: true)]`, which
+ *   `EntityView` lays over this definition — not here, because §4 below keeps this class away
+ *   from `contentflyAdmin`.
  * - `file` and `join` are not disjoint (gap L7) — both arise from `ManyToOne`. They are told
  *   apart by the type alias, never by the mapping.
  * - `checkbox` and `radio` deliver a `group` id and no option list (gap L8). The group is passed

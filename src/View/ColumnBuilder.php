@@ -139,7 +139,7 @@ final class ColumnBuilder
      *
      * @param string $entity Entity name as the schema spells it, e.g. `Harness\Feldtyp`
      *
-     * @return list<array{property: string, label: string}>
+     * @return list<array{property: string, label: string, filterable: bool}>
      */
     public function build(string $entity): array
     {
@@ -251,15 +251,22 @@ final class ColumnBuilder
      * `isListable()`. Nobody is likely to label it, but a column that silently ignores an
      * attribute the next column honours is the kind of exception that costs an afternoon.
      *
+     * `filterable` IS CARRIED WITHOUT A CONSUMER, ON PURPOSE (ADR 0017 §3). `isFilterable` is a
+     * core key present on every field (`an_project/docs/schema-vertrag.md` §1.3), and the filter
+     * interface that reads it is story 002-004. It is set here and not there because this list is
+     * the single definition of what a column *is* — adding the flag later would mean reopening
+     * this method and its two callers for a one-line copy.
+     *
      * @param array<string,mixed>|mixed $meta The field's schema entry, or null when it has none
      *
-     * @return array{property: string, label: string}
+     * @return array{property: string, label: string, filterable: bool}
      */
     private function column(string $property, $meta = null): array
     {
         return array(
-            'property' => $property,
-            'label'    => Shaping::label($meta) ?? self::humanise($property),
+            'property'   => $property,
+            'label'      => Shaping::label($meta) ?? self::humanise($property),
+            'filterable' => is_array($meta) && ($meta['isFilterable'] ?? false) === true,
         );
     }
 

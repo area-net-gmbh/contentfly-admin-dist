@@ -78,7 +78,7 @@ final class EntityView
      *
      * @param string $entity Entity name as the schema spells it, e.g. `Harness\Feldtyp`
      *
-     * @return list<array{property: string, label: string}>
+     * @return list<array{property: string, label: string, filterable: bool}>
      */
     public function listColumns(string $entity): array
     {
@@ -138,6 +138,22 @@ final class EntityView
              */
             if (($shaping['readonly'] ?? null) === true) {
                 $widget['readonly'] = true;
+            }
+
+            /*
+             * `required` CLOSES GAP L2', AND ONLY UPWARDS. Seven of the 21 types carry no
+             * `nullable` at all, so `WidgetResolver` cannot tell "not required" from "unknown"
+             * and reports neither — the attribute is the only way to mark such a field mandatory
+             * (ADR 0017 §5). A stated `required: false` is ignored for the same reason
+             * `readonly: false` is: `nullable: false` is the database's own statement, and a form
+             * that offered such a field as optional would move the error to the save.
+             *
+             * It is read here and not in the resolver because ADR 0013 §4, as narrowed by ADR
+             * 0015, keeps the resolver away from `contentflyAdmin` altogether — the same reason
+             * `rte` sits here.
+             */
+            if (($shaping['required'] ?? null) === true) {
+                $widget['required'] = true;
             }
 
             /*
