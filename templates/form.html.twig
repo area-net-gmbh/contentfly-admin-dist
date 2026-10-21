@@ -34,17 +34,25 @@
     the core at all, so a form rendered without it cannot be saved. It is a hidden field plus a
     cookie — `Auth\FormToken` — and the promise ADR 0010 assigned to this story.
 
-    THE ERROR SITS ABOVE THE FORM FOR NOW, announced with `role="alert"` the way the sign-in
-    mask does it. Putting it at the field that caused it is story 002-006-0005: the core names
-    no field, and the one encapsulated place that guesses it from the message text is settled in
-    ADR 0014. Until then the finding is shown raw rather than swallowed.
+    A FINDING GOES TO ITS FIELD WHEN ITS FIELD IS KNOWN, otherwise above the form — the decision
+    is `FormController::reject()`'s, the two places are here. The core names no field (gap L19),
+    so the one that is known was guessed from the message text at the single place ADR 0014
+    allows; when the guess misses, the message is still shown. It never disappears.
+
+    IT SAYS THAT IT IS ONE FINDING, NOT ALL OF THEM. The core fills `errors` with exactly one
+    entry (gap L20), so a form with twelve fields needs one save per problem. Saying so is the
+    difference between an editor who saves again and one who believes everything else passed.
+
+    A FIELD ERROR IS TIED TO ITS CONTROL with `aria-describedby` and `aria-invalid`, so a screen
+    reader reads the message as part of the field rather than as loose text nearby.
 #}{% extends 'layout.html.twig' %}
 
 {% macro field(field) %}
-        <div class="admin-form__field">
+{% set described = field.error ? 'error-' ~ field.property : '' %}
+        <div class="admin-form__field{% if field.error %} admin-form__field--invalid{% endif %}">
 {% if field.control == 'checkbox' %}
             <label class="admin-form__label admin-form__label--inline" for="field-{{ field.property }}">
-                <input class="admin-form__checkbox" type="checkbox" id="field-{{ field.property }}" name="{{ field.property }}" value="1"{% if field.checked %} checked{% endif %}>
+                <input class="admin-form__checkbox" type="checkbox" id="field-{{ field.property }}" name="{{ field.property }}" value="1"{% if field.checked %} checked{% endif %}{% if field.error %} aria-invalid="true" aria-describedby="{{ described }}"{% endif %}>
                 {{ field.label }}
             </label>
 {% else %}
@@ -53,9 +61,9 @@
 {% if field.control == 'display' %}
             <p class="admin-form__display" id="field-{{ field.property }}">{{ field.value ?: '—' }}</p>
 {% elseif field.control == 'textarea' %}
-            <textarea class="admin-form__control" id="field-{{ field.property }}" name="{{ field.property }}" rows="6"{% if field.required %} required{% endif %}>{{ field.value }}</textarea>
+            <textarea class="admin-form__control" id="field-{{ field.property }}" name="{{ field.property }}" rows="6"{% if field.required %} required{% endif %}{% if field.error %} aria-invalid="true" aria-describedby="{{ described }}"{% endif %}>{{ field.value }}</textarea>
 {% elseif field.control == 'select' %}
-            <select class="admin-form__control" id="field-{{ field.property }}" name="{{ field.property }}"{% if field.required %} required{% endif %}>
+            <select class="admin-form__control" id="field-{{ field.property }}" name="{{ field.property }}"{% if field.required %} required{% endif %}{% if field.error %} aria-invalid="true" aria-describedby="{{ described }}"{% endif %}>
 {% if not field.required %}
                 <option value=""></option>
 {% endif %}
@@ -64,8 +72,11 @@
 {% endfor %}
             </select>
 {% else %}
-            <input class="admin-form__control" type="{{ field.control }}" id="field-{{ field.property }}" name="{{ field.property }}" value="{{ field.value }}"{% if field.maxlength %} maxlength="{{ field.maxlength }}"{% endif %}{% if field.required %} required{% endif %}>
+            <input class="admin-form__control" type="{{ field.control }}" id="field-{{ field.property }}" name="{{ field.property }}" value="{{ field.value }}"{% if field.maxlength %} maxlength="{{ field.maxlength }}"{% endif %}{% if field.required %} required{% endif %}{% if field.error %} aria-invalid="true" aria-describedby="{{ described }}"{% endif %}>
 {% endif %}
+{% endif %}
+{% if field.error %}
+            <p class="admin-form__field-error" id="{{ described }}">{{ field.error }}</p>
 {% endif %}
         </div>
 {% endmacro %}
@@ -82,6 +93,9 @@
 {% if error %}
     <p class="admin-form__error" role="alert">{{ error }}</p>
 {% endif %}
+{% if partial %}
+    <p class="admin-form__hint">Das Grundsystem meldet immer nur einen Punkt auf einmal — nach dem Beheben kann beim nächsten Speichern ein weiterer dazukommen.</p>
+{% endif %}
 
 {% if tabs is empty %}
     <p class="admin__hint">Diese Entität hat keine bearbeitbaren Felder.</p>
@@ -92,11 +106,11 @@
         <div class="admin-form__tabs" data-controller="admin-tabs">
             <div class="admin-form__tablist" role="tablist" aria-label="Feldgruppen">
 {% for tab in tabs %}
-                <button class="admin-form__tab" type="button" role="tab" id="tab-{{ tab.index }}" aria-controls="panel-{{ tab.index }}" aria-selected="{{ loop.first ? 'true' : 'false' }}" data-admin-tabs-target="tab" data-action="click->admin-tabs#select keydown->admin-tabs#key">{{ tab.name }}</button>
+                <button class="admin-form__tab{% if tab.hasError %} admin-form__tab--invalid{% endif %}" type="button" role="tab" id="tab-{{ tab.index }}" aria-controls="panel-{{ tab.index }}" aria-selected="{{ loop.first ? 'true' : 'false' }}" data-admin-tabs-target="tab" data-action="click->admin-tabs#select keydown->admin-tabs#key">{{ tab.name }}</button>
 {% endfor %}
             </div>
 {% for tab in tabs %}
-            <section class="admin-form__panel" role="tabpanel" id="panel-{{ tab.index }}" aria-labelledby="tab-{{ tab.index }}" data-admin-tabs-target="panel">
+            <section class="admin-form__panel" role="tabpanel" id="panel-{{ tab.index }}" aria-labelledby="tab-{{ tab.index }}" data-admin-tabs-target="panel"{% if tab.hasError %} data-admin-tabs-invalid="true"{% endif %}>
 {% for field in tab.fields %}
 {{ form.field(field) }}
 {% endfor %}

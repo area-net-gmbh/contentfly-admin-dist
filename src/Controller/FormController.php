@@ -7,8 +7,10 @@ namespace Areanet\ContentflyAdmin\Controller;
 use Areanet\ContentflyAdmin\AdminManager;
 use Areanet\ContentflyAdmin\Asset\Importmap;
 use Areanet\ContentflyAdmin\Auth\FormToken;
+use Areanet\ContentflyAdmin\Schema\Envelope;
 use Areanet\ContentflyAdmin\Schema\SchemaClient;
 use Areanet\ContentflyAdmin\View\EntityView;
+use Areanet\ContentflyAdmin\View\FieldError;
 use Areanet\ContentflyAdmin\View\MenuBuilder;
 use Areanet\ContentflyAdmin\View\TemplateRenderer;
 use Areanet\PIM\Classes\Api;
@@ -221,14 +223,17 @@ final class FormController
     private function save(Request $request, string $name, ?string $id, ?string $language, array $fields): Response
     {
         if (!FormToken::verify($request)) {
-            return $this->reject(
-                $request,
-                $name,
-                $id,
-                $fields,
-                'Das Formular ist abgelaufen oder wurde nicht von dieser Seite abgeschickt. Bitte erneut absenden.',
-                $language
-            );
+            /*
+             * NOT A CORE FINDING, SO IT CARRIES NO FIELD. The token is the admin's own
+             * mechanism; `null` for the error entry makes `reject()` show this sentence above
+             * the form, which is where it belongs — no single field is wrong here.
+             */
+            return $this->reject($request, $name, $id, $fields, array(
+                'ok'       => false,
+                'readable' => true,
+                'data'     => null,
+                'error'    => null,
+            ), $language, 'Das Formular ist abgelaufen oder wurde nicht von dieser Seite abgeschickt. Bitte erneut absenden.');
         }
 
         $payload = array(
@@ -255,19 +260,10 @@ final class FormController
         );
 
         $response = $this->app->handle($sub, HttpKernelInterface::SUB_REQUEST);
-        $envelope = json_decode((string) $response->getContent(), true);
-        $envelope = is_array($envelope) ? $envelope : array();
-        $errors   = $envelope['errors'] ?? null;
+        $envelope = Envelope::read($response->getContent(), $response->getStatusCode());
 
-        if ($response->getStatusCode() !== 200 || (is_array($errors) && $errors !== array())) {
-            return $this->reject(
-                $request,
-                $name,
-                $id,
-                $fields,
-                self::message($errors, $response->getStatusCode()),
-                $language
-            );
+        if (!$envelope['ok']) {
+            return $this->reject($request, $name, $id, $fields, $envelope, $language);
         }
 
         /*
@@ -276,7 +272,7 @@ final class FormController
          * page. The redirect goes to the saved record's own form, so an insert lands on the
          * record it just created rather than on an empty mask that invites a second one.
          */
-        $saved = $id ?? self::savedId($envelope);
+        $saved = $id ?? Envelope::id($envelope['data']);
         $base  = $this->app[AdminManager::CONTAINER_KEY]->getPrefix().'/form/'.MenuBuilder::entityToUrl($name);
 
         if ($saved === null) {
@@ -294,31 +290,59 @@ final class FormController
     }
 
     /**
-     * The form again, with the submitted input still in it and a message above it.
+     * The form again, with the submitted input still in it and the finding where it belongs.
      *
      * 422 IS THE OTHER HALF OF TURBO'S CONTRACT: a rejected submission answers a non-2xx with
      * the re-rendered form, and Turbo then swaps it in place. A 200 here would be discarded and
      * the editor would be left looking at the form they submitted, with no message and no clue.
+     *
+     * WHERE THE MESSAGE GOES IS DECIDED HERE AND NOWHERE ELSE. `FieldError::property()` reads
+     * the `Entity::field` prefix out of the core's free text and is gated on the fields this
+     * form offers; on a hit the message sits at that field, otherwise above the form. The
+     * message never disappears — that is the whole shape of the fallback ADR 0014 settled on.
+     *
+     * ONE FINDING AT A TIME, AND THE FORM DOES NOT PRETEND OTHERWISE. The core fills `errors`
+     * with exactly one entry (gap L20), so a form with twelve fields needs one save per
+     * problem. The template says so in as many words rather than leaving the editor to assume
+     * everything else passed.
      *
      * THE RECORD IS LOADED AGAIN ON THIS PATH, and only on it. The display-only fields — a
      * relation, a file, anything `readonly` — are not submitted, so without the record they
      * would come back empty and the rejected form would look as if it had lost data it never
      * carried.
      *
-     * @param list<array<string,mixed>> $fields
+     * @param list<array<string,mixed>>                                              $fields
+     * @param array{ok: bool, readable: bool, data: mixed, error: array<string,mixed>|null} $envelope
+     * @param string|null                                                            $override A
+     *        message the admin itself produced, used instead of reading the envelope
      */
     private function reject(
         Request $request,
         string $name,
         ?string $id,
         array $fields,
-        ?string $error,
-        ?string $language
+        array $envelope,
+        ?string $language,
+        ?string $override = null
     ): Response {
         $record = $id === null ? null : $this->load($request, $name, $id, $language);
         $values = self::submittedValues($fields, $request) + self::recordValues($fields, $record);
 
-        return $this->render($request, $name, $id, $fields, $values, 422, $error);
+        $message  = $override ?? FieldError::message($envelope['error'], $envelope['readable']);
+        $property = $override === null
+            ? FieldError::property($envelope['error'], array_column($fields, 'property'))
+            : null;
+
+        return $this->render(
+            $request,
+            $name,
+            $id,
+            $fields,
+            $values,
+            422,
+            $property === null ? $message : null,
+            $property === null ? array() : array($property => $message)
+        );
     }
 
     /**
@@ -326,6 +350,7 @@ final class FormController
      *
      * @param list<array<string,mixed>> $fields
      * @param array<string,mixed>       $values
+     * @param array<string,string>      $fieldErrors Property → message, at most one entry
      */
     private function render(
         Request $request,
@@ -334,10 +359,11 @@ final class FormController
         array $fields,
         array $values,
         int $status,
-        ?string $error
+        ?string $error,
+        array $fieldErrors = array()
     ): Response {
         $manager = $this->app[AdminManager::CONTAINER_KEY];
-        $tabs    = self::tabs($fields, $values);
+        $tabs    = self::tabs($fields, $values, $fieldErrors);
         $base    = $manager->getPrefix().'/form/'.MenuBuilder::entityToUrl($name);
         $token   = FormToken::issue($request);
 
@@ -355,6 +381,11 @@ final class FormController
             'token'      => $token,
             'error'      => $error,
             'tabs'       => $tabs,
+            /*
+             * The editor is told that one finding is all the core reports (gap L20), so the
+             * absence of further messages is not read as "everything else is fine".
+             */
+            'partial'    => $fieldErrors !== array() || $error !== null,
             /*
              * THE LAYOUT LOADS STIMULUS ONLY WHERE A VIEW ASKS FOR IT, and this view only needs
              * it when there is something to switch between. Deciding that here rather than in
@@ -419,78 +450,6 @@ final class FormController
         }
 
         return $data;
-    }
-
-    /**
-     * What the editor is told about a rejected save. Never empty.
-     *
-     * DELIBERATELY RAW, AND DELIBERATELY NOT AT A FIELD. Assigning an error to the field that
-     * caused it, and turning the core's message key into German, is story 002-006-0005 — the
-     * core names no field (gap L19) and `detail` is only the message key (L21), so both need
-     * the one encapsulated place ADR 0014 describes. Until then the editor gets the finding
-     * above the form rather than a save that silently did nothing.
-     *
-     * THERE IS ALWAYS A FALLBACK, and it is not defensive padding — it covers a case that is
-     * reproducible today. With `APP_DEBUG` on, the core's error handler answers a validation
-     * failure with its debug page instead of the envelope (`bootstrap-web.php`), so there is
-     * nothing to read; the development harness runs exactly that way on purpose. A 422 carrying
-     * no message would then look to an editor like a save that quietly did nothing, which is
-     * the one outcome this whole path exists to prevent. The debug page itself is never shown:
-     * it is a stack trace.
-     *
-     * @param mixed $errors
-     */
-    private static function message($errors, int $status): string
-    {
-        $found = self::firstError($errors);
-
-        if ($found !== null) {
-            return $found;
-        }
-
-        return 'Das Speichern wurde abgelehnt, und die Antwort des Grundsystems enthielt keine '
-            .'auswertbare Meldung (Status '.$status.').';
-    }
-
-    /**
-     * The first error of the envelope as one plain string, or `null` when there is none to read.
-     *
-     * @param mixed $errors
-     */
-    private static function firstError($errors): ?string
-    {
-        if (!is_array($errors) || $errors === array()) {
-            return null;
-        }
-
-        $first = $errors[0] ?? null;
-
-        if (!is_array($first)) {
-            return null;
-        }
-
-        foreach (array('detail', 'code') as $key) {
-            $value = $first[$key] ?? null;
-
-            if (is_string($value) && $value !== '') {
-                return $value;
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * The id the core reports for a freshly inserted record, or `null`.
-     *
-     * @param array<string,mixed> $envelope
-     */
-    private static function savedId(array $envelope): ?string
-    {
-        $data = $envelope['data'] ?? null;
-        $id   = is_array($data) ? ($data['id'] ?? null) : null;
-
-        return is_scalar($id) && (string) $id !== '' ? (string) $id : null;
     }
 
     /**
@@ -581,10 +540,11 @@ final class FormController
      *
      * @param list<array{property: string, label: string, tab: string|null, widget: array<string,mixed>}> $fields
      * @param array<string,mixed>                                                                                 $values
+     * @param array<string,string>      $errors Property → message
      *
      * @return list<array{name: string, index: int, fields: list<array<string,mixed>>}>
      */
-    private static function tabs(array $fields, array $values): array
+    private static function tabs(array $fields, array $values, array $errors): array
     {
         $grouped = array();
 
@@ -608,11 +568,20 @@ final class FormController
         $index = 0;
 
         foreach ($ordered + $grouped as $name => $group) {
+            $controls = self::controls($group, $values, $errors);
+
             $tabs[] = array(
                 'name'   => (string) $name,
                 /* Only has to be unique inside this page — it feeds the `id`/`aria-controls` pair. */
                 'index'  => $index++,
-                'fields' => self::controls($group, $values),
+                'fields' => $controls,
+                /*
+                 * A FINDING IN A HIDDEN GROUP HAS TO BRING THAT GROUP FORWARD, or the form
+                 * announces a problem about something the editor cannot see. The template
+                 * passes this to the tabs controller, which opens the first marked group
+                 * instead of the first one.
+                 */
+                'hasError' => array_filter(array_column($controls, 'error')) !== array(),
             );
         }
 
@@ -629,10 +598,11 @@ final class FormController
      *
      * @param list<array{property: string, label: string, widget: array<string,mixed>}> $fields
      * @param array<string,mixed>                                                               $values
+     * @param array<string,string>      $errors Property → message
      *
      * @return list<array<string,mixed>>
      */
-    private static function controls(array $fields, array $values): array
+    private static function controls(array $fields, array $values, array $errors): array
     {
         $controls = array();
 
@@ -649,6 +619,7 @@ final class FormController
                 'options'   => self::options($widget),
                 'value'     => self::value($raw),
                 'checked'   => self::checked($raw),
+                'error'     => $errors[$field['property']] ?? null,
             );
         }
 

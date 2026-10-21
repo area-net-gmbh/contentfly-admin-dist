@@ -11,9 +11,10 @@
  * by script — would turn a module that fails to load into a form showing one group of fields
  * and no sign that the rest exist.
  *
- * STORY 002-006-0005 WILL NEED ONE MORE THING: a validation error belonging to a field in a
- * hidden group has to bring that group forward, or the message is announced for something the
- * editor cannot see. `activate()` is the hook for it.
+ * A GROUP WITH A FINDING OPENS FIRST (002-006-0005). A validation error belonging to a field in
+ * a hidden group would otherwise be announced about something the editor cannot see. The server
+ * marks that panel with `data-admin-tabs-invalid`; which group it is can only be known there,
+ * because the core reports the finding to the request, not to the page.
  */
 
 import { Controller } from '@hotwired/stimulus';
@@ -22,7 +23,11 @@ export default class extends Controller {
     static targets = ['tab', 'panel'];
 
     connect() {
-        this.activate(0);
+        const invalid = this.panelTargets.findIndex(
+            (panel) => panel.dataset.adminTabsInvalid === 'true',
+        );
+
+        this.activate(invalid === -1 ? 0 : invalid);
     }
 
     select(event) {

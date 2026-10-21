@@ -485,3 +485,41 @@ li {
     background: var(--admin-danger-surface);
     color: var(--admin-danger-text);
 }
+
+/*
+ * A finding at its field (002-006-0005).
+ *
+ * THE COLOUR IS NEVER THE MESSAGE. The text under the control says what is wrong, the control
+ * carries `aria-invalid` and points at that text with `aria-describedby`, and the red border is
+ * the third, redundant signal — the one that stops working first, on a bad screen or for a
+ * reader who does not distinguish it.
+ */
+.admin-form__field-error {
+    margin: 0.375rem 0 0;
+    color: var(--admin-danger-text);
+    font-size: 0.875rem;
+}
+
+.admin-form__field--invalid .admin-form__control {
+    border-color: var(--admin-danger);
+}
+
+/* A tab whose group holds the finding. The controller opens it; this marks it as well. */
+.admin-form__tab--invalid {
+    color: var(--admin-danger-text);
+}
+
+.admin-form__tab--invalid[aria-selected="true"] {
+    border-bottom-color: var(--admin-danger);
+}
+
+/*
+ * The note that the core reports one finding at a time. Muted on purpose: it explains the
+ * situation, it is not itself a problem.
+ */
+.admin-form__hint {
+    max-width: 44rem;
+    margin: 0 0 1.25rem;
+    color: var(--admin-muted);
+    font-size: 0.875rem;
+}
