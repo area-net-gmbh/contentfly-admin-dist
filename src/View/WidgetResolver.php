@@ -24,9 +24,9 @@ namespace Areanet\ContentflyAdmin\View;
  *
  * THE RESOLUTION IS A CHAIN AND THE FIRST MATCH WINS: an override for one concrete field, an
  * override for a field type, the inference below, the fallback. That order is fixed in ADR 0013
- * and mirrors how the core's `TypeManager` resolves. This class holds the last two links; the
- * first two arrive with `WidgetRegistry`, which is why the order is written down here rather
- * than left to whoever adds them.
+ * and mirrors how the core's `TypeManager` resolves. The first two links are the `WidgetRegistry`,
+ * which this class asks before it infers anything; it is empty until a project fills it in
+ * story 005-002.
  *
  * THE TYPES ARE AN ALLOWLIST, as in `ColumnBuilder`. The core registers 21 types and a plugin may
  * add a 22nd (`Api.php:1872-1879`); an unknown type therefore resolves to `readonly` — the value
@@ -101,6 +101,13 @@ final class WidgetResolver
     /** The one type whose value the core computes; it can be shown but never written. */
     private const COMPUTED_TYPE = 'virtualjoin';
 
+    private WidgetRegistry $registry;
+
+    public function __construct(WidgetRegistry $registry)
+    {
+        $this->registry = $registry;
+    }
+
     /**
      * The widget definition for one field of the schema.
      *
@@ -112,26 +119,33 @@ final class WidgetResolver
      * that only some widgets need are present only where they apply: `maxlength`, `options`,
      * `group` and `target`. A template therefore never has to tell "absent" from "empty".
      *
-     * @param array<string,mixed>|mixed $meta The field's schema entry
+     * @param string                    $entity   Entity name as the schema spells it
+     * @param string                    $property The property name
+     * @param array<string,mixed>|mixed $meta     The field's schema entry
      *
      * @return array{widget: string, type: string|null, required: bool, readonly: bool, default: mixed, maxlength?: int, options?: array<int,mixed>, group?: string, target?: string}
      */
-    public function resolve($meta): array
+    public function resolve(string $entity, string $property, $meta): array
     {
-        if (!is_array($meta)) {
-            return self::fallback(null);
-        }
-
+        $meta = is_array($meta) ? $meta : array();
         $type = $meta['type'] ?? null;
+        $type = is_string($type) ? $type : null;
 
-        if (!is_string($type) || !isset(self::WIDGETS[$type])) {
-            return self::fallback(is_string($type) ? $type : null);
+        $override = $this->registry->find($entity, $property, $type);
+
+        if ($type === null || !isset(self::WIDGETS[$type])) {
+            return self::fallback($type, $override);
         }
 
+        /*
+         * The override replaces the element, never the facts about the field. `maxlength`,
+         * `options` and `group` therefore follow the INFERRED widget: a project that puts its
+         * own text widget on a `string(50)` still gets the 50 passed to it.
+         */
         $widget = self::WIDGETS[$type];
 
         $definition = array(
-            'widget'   => $widget,
+            'widget'   => $override ?? $widget,
             'type'     => $type,
             'required' => ($meta['nullable'] ?? null) === false,
             'readonly' => $type === self::COMPUTED_TYPE,
@@ -183,20 +197,26 @@ final class WidgetResolver
     }
 
     /**
-     * The definition for a field this package cannot edit.
+     * The definition for a field this package cannot edit by itself.
      *
      * `required` stays false and `default` stays empty on purpose: for a type we do not know,
      * both would be guesses, and a guess here is indistinguishable from knowledge later.
      *
+     * AN OVERRIDE ALSO LIFTS THE `readonly` HERE. The flag says "we do not know how to edit
+     * this", and a project that registers a widget for exactly this type says it does — leaving
+     * the field read-only would ignore the registration while appearing to honour it. The one
+     * case an override cannot lift is `virtualjoin` above, where the core computes the value and
+     * no widget changes that.
+     *
      * @return array{widget: string, type: string|null, required: bool, readonly: bool, default: mixed}
      */
-    private static function fallback(?string $type): array
+    private static function fallback(?string $type, ?string $override): array
     {
         return array(
-            'widget'   => self::FALLBACK_WIDGET,
+            'widget'   => $override ?? self::FALLBACK_WIDGET,
             'type'     => $type,
             'required' => false,
-            'readonly' => true,
+            'readonly' => $override === null,
             'default'  => null,
         );
     }

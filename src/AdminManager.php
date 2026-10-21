@@ -16,6 +16,7 @@ use Areanet\ContentflyAdmin\Schema\VersionGuard;
 use Areanet\ContentflyAdmin\View\ColumnBuilder;
 use Areanet\ContentflyAdmin\View\MenuBuilder;
 use Areanet\ContentflyAdmin\View\TemplateRenderer;
+use Areanet\ContentflyAdmin\View\WidgetRegistry;
 use Areanet\ContentflyAdmin\View\WidgetResolver;
 use Areanet\PIM\Classes\Kernel\ApplicationInterface;
 use Symfony\Component\HttpFoundation\RedirectResponse;
@@ -172,8 +173,12 @@ final class AdminManager
             return new ColumnBuilder($app[SchemaClient::CONTAINER_KEY]);
         };
 
-        $this->app[WidgetResolver::CONTAINER_KEY] = static function (): WidgetResolver {
-            return new WidgetResolver();
+        $this->app[WidgetRegistry::CONTAINER_KEY] = static function (): WidgetRegistry {
+            return new WidgetRegistry();
+        };
+
+        $this->app[WidgetResolver::CONTAINER_KEY] = static function ($app): WidgetResolver {
+            return new WidgetResolver($app[WidgetRegistry::CONTAINER_KEY]);
         };
     }
 
