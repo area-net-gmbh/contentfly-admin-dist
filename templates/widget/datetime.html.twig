@@ -1,0 +1,10 @@
+{#
+    A date with a time. The value is the core's `LOCAL` form, which is what `datetime-local`
+    expects and what the save path writes back (`FormController::value()`).
+
+    THE NATIVE CONTROL IS THE FLOOR, NOT THE GOAL. Story task 002-007-0003 puts a picker of this
+    package's own on top of it; it has to keep writing the same `LOCAL` form, or the form saves
+    something the core silently misreads.
+#}
+{% include 'widget/_label.html.twig' %}
+            <input class="admin-form__control" type="datetime-local" id="field-{{ field.property }}" name="{{ field.property }}" value="{{ field.value }}"{% if field.required %} required{% endif %}{% if field.error %} aria-invalid="true" aria-describedby="{{ described }}"{% endif %}>

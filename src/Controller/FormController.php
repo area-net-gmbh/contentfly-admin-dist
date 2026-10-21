@@ -71,29 +71,44 @@ final class FormController
     private const DEFAULT_TAB = 'Allgemein';
 
     /**
-     * Which HTML control a widget key gets in stage 1.
+     * ADR 0013's sixteen widget keys, and whether this package offers an input for each.
      *
-     * THE ONE PLACE THIS DECISION LIVES, and the one story 002-007 replaces. The widget keys are
-     * ADR 0013's sixteen; what they map to here is a small set of plain controls, because this
-     * task renders a usable form and not the final element for each of the 21 field types.
+     * TWO FACTS IN ONE PLACE, ON PURPOSE. The key set is what a fragment may be named
+     * (`templates/widget/<key>.html.twig`, ADR 0016 §1), and the flag is whether the field is
+     * written on submit. They belong together because separating them is how a form grows an
+     * input whose value the save path ignores, or — far worse — a field that is only displayed
+     * and still written. A later task flips one `false` and adds the matching fragment; nothing
+     * else has to move.
      *
-     * A KEY THAT IS ABSENT IS SHOWN, NOT OFFERED — see `control()`. That covers `entity`,
-     * `entitylist`, `file`, `filelist`, `radio`, `checkboxgroup` and `permissionmatrix`, and it
-     * is the same reasoning ADR 0013 used for its `readonly` fallback: those widgets need the
-     * records or files they point at, and a bare text box over a relation would be a control
-     * whose value this package cannot yet form correctly. Displaying it risks nothing and is
-     * the honest answer until 002-007 builds them. `payload()` relies on this: what is shown
-     * rather than offered is never written, whatever arrives in the body.
+     * `false` IS NOT A GAP, it is the honest answer while the element does not exist:
+     * `readonly` by definition, `entity`/`entitylist`/`radio`/`checkboxgroup` until
+     * 002-007-0004, `file`/`filelist` until story 003-004, `permissionmatrix` as the secondary
+     * case ADR 0013 describes. A bare text box over a relation would be a control whose value
+     * this package cannot form correctly; displaying it risks nothing.
+     *
+     * A KEY THAT IS NOT LISTED AT ALL — a 22nd core type, a project override naming something
+     * unknown — is `readonly` too (`fragment()`), which is also what keeps the template name
+     * built from this value inside `templates/widget/`.
+     *
+     * @var array<string,bool>
      */
-    private const CONTROLS = array(
-        'text'     => 'text',
-        'number'   => 'number',
-        'datetime' => 'datetime-local',
-        'time'     => 'time',
-        'textarea' => 'textarea',
-        'json'     => 'textarea',
-        'boolean'  => 'checkbox',
-        'select'   => 'select',
+    private const FRAGMENTS = array(
+        'text'             => true,
+        'textarea'         => true,
+        'number'           => true,
+        'boolean'          => true,
+        'datetime'         => true,
+        'time'             => true,
+        'json'             => true,
+        'select'           => true,
+        'entity'           => false,
+        'entitylist'       => false,
+        'radio'            => false,
+        'checkboxgroup'    => false,
+        'file'             => false,
+        'filelist'         => false,
+        'permissionmatrix' => false,
+        'readonly'         => false,
     );
 
     /** @var \Areanet\PIM\Classes\Kernel\ApplicationInterface */
@@ -407,10 +422,11 @@ final class FormController
     /**
      * The fields this form is allowed to write, as the core's `data` map.
      *
-     * A `display` FIELD IS NEVER WRITTEN, whatever arrives in the body. The list comes from the
-     * field definitions and not from the request, so a hand-crafted post cannot add a property
-     * the form does not offer — which covers both halves at once: a field the entity marks
-     * `readonly` or `hide`, and a relation whose widget story 002-007 has yet to build.
+     * A FIELD THAT IS ONLY SHOWN IS NEVER WRITTEN, whatever arrives in the body — `writable()`
+     * answers that off the fragment. The list comes from the field definitions and not from the
+     * request, so a hand-crafted post cannot add a property the form does not offer, which covers
+     * every half at once: a field the entity marks `readonly` or `hide`, a value the core
+     * computes, and a relation whose fragment 002-007-0004 has yet to build.
      *
      * AN UNCHECKED BOX SENDS NOTHING AT ALL. A boolean therefore has to be derived from presence
      * rather than read from the body, or unticking one could never be saved.
@@ -429,7 +445,7 @@ final class FormController
         $data      = array();
 
         foreach ($fields as $field) {
-            if (self::control($field['widget']) === 'display') {
+            if (!self::writable($field['widget'])) {
                 continue;
             }
 
@@ -477,9 +493,9 @@ final class FormController
     /**
      * The values a rejected submission renders — only the fields the form actually offers.
      *
-     * The display-only fields are left out on purpose, so the record's own values fill them in
-     * (`reject()`); they were never submitted and inventing an empty value for them would make
-     * the rejected form look as though it had dropped data.
+     * The fields that are only shown are left out on purpose, so the record's own values fill
+     * them in (`reject()`); they were never submitted and inventing an empty value for them would
+     * make the rejected form look as though it had dropped data.
      *
      * @param list<array<string,mixed>> $fields
      *
@@ -491,7 +507,7 @@ final class FormController
         $values    = array();
 
         foreach ($fields as $field) {
-            if (self::control($field['widget']) === 'display') {
+            if (!self::writable($field['widget'])) {
                 continue;
             }
 
@@ -591,10 +607,11 @@ final class FormController
     /**
      * The fields with everything the template needs to render one row each.
      *
-     * THE TEMPLATE DECIDES NOTHING HERE. It walks this list and switches on `control`; which
-     * control a field gets, whether it is editable at all and what its value prints as are all
-     * answered in PHP. That is the same split the list view uses, and for the same reason: a
-     * wrong type reaching Twig is a runtime error on the page nobody tested with that field.
+     * THE TEMPLATE DECIDES NOTHING HERE. It walks this list and includes the fragment that
+     * `widget` names; which fragment a field gets, whether it is editable at all and what its
+     * value prints as are all answered in PHP. That is the same split the list view uses, and for
+     * the same reason: a wrong type reaching Twig is a runtime error on the page nobody tested
+     * with that field.
      *
      * @param list<array{property: string, label: string, widget: array<string,mixed>}> $fields
      * @param array<string,mixed>                                                               $values
@@ -613,7 +630,13 @@ final class FormController
             $controls[] = array(
                 'property'  => $field['property'],
                 'label'     => $field['label'],
-                'control'   => self::control($widget),
+                'widget'    => self::fragment($widget),
+                /*
+                 * THE CORE ALIAS GOES ALONG because three of them share one widget key:
+                 * `number` has to know whether it is looking at an `integer` or at a `decimal`,
+                 * or a browser rejects the decimal's own values.
+                 */
+                'type'      => $widget['type'] ?? null,
                 'required'  => ($widget['required'] ?? false) === true,
                 'maxlength' => $widget['maxlength'] ?? null,
                 'options'   => self::options($widget),
@@ -627,24 +650,48 @@ final class FormController
     }
 
     /**
-     * Which control one field is rendered with, or `display` for a value that is only shown.
+     * Which fragment under `templates/widget/` renders one field.
+     *
+     * `readonly` IS AN ANSWER AND NOT AN ERROR CASE — it is one of ADR 0013's sixteen keys and
+     * the fallback for the other three ways a field can end up shown instead of offered: the
+     * entity marks it `readonly`, the core computes it, or its key is unknown here.
      *
      * @param array<string,mixed> $widget
      */
-    private static function control(array $widget): string
+    private static function fragment(array $widget): string
     {
         if (($widget['readonly'] ?? false) === true) {
-            return 'display';
+            return 'readonly';
         }
 
         $key = (string) ($widget['widget'] ?? '');
 
-        /* `select` without options would be an empty dropdown — worse than showing the value. */
-        if ($key === 'select' && self::options($widget) === array()) {
-            return 'display';
+        if (!isset(self::FRAGMENTS[$key])) {
+            return 'readonly';
         }
 
-        return self::CONTROLS[$key] ?? 'display';
+        /* `select` without options would be an empty dropdown — worse than showing the value. */
+        if ($key === 'select' && self::options($widget) === array()) {
+            return 'readonly';
+        }
+
+        return $key;
+    }
+
+    /**
+     * Whether one field is written when the form is submitted.
+     *
+     * READ OFF THE FRAGMENT, NOT THE WIDGET KEY, so the two can never disagree: whatever reason
+     * sent a field to `readonly` — the attribute, a computed value, an optionless select, an
+     * unknown key — also takes it out of the save path. `payload()` and `submittedValues()` are
+     * the two callers, and they are the reason this is one function and not a condition written
+     * twice.
+     *
+     * @param array<string,mixed> $widget
+     */
+    private static function writable(array $widget): bool
+    {
+        return self::FRAGMENTS[self::fragment($widget)];
     }
 
     /**

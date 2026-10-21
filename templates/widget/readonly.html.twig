@@ -1,0 +1,18 @@
+{#
+    A value that is shown and not offered — ADR 0013's sixteenth key, and the fallback for
+    everything else.
+
+    THREE DIFFERENT THINGS LAND HERE, and that they share one fragment is deliberate:
+    a field the entity marks `readonly`, a value the core computes (`virtualjoin`), and a widget
+    key that has no fragment yet or none at all — a relation before 002-007-0004, a file before
+    story 003-004, a 22nd type from a plugin. In every one of those cases an input would be a
+    control whose value this package cannot form correctly, and `FormController::writable()`
+    keeps all of them out of the save path, so nothing here can be written by a hand-crafted post
+    either.
+
+    The dash belongs to this case alone. `FormController::value()` answers the empty string for
+    anything it cannot print, and in an input that would be a value an editor could save by
+    accident.
+#}
+{% include 'widget/_label.html.twig' %}
+            <p class="admin-form__display" id="field-{{ field.property }}">{{ field.value ?: '—' }}</p>

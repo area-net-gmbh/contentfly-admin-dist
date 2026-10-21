@@ -1,0 +1,9 @@
+{#
+    One field's label, with the required marker.
+
+    Included by every fragment whose control sits *below* its label — all of them except
+    `boolean`, where the box belongs inside its own label. The fragment owns this rather than the
+    `field()` macro, so the macro has no per-key branch left at all: it opens the wrapper, pulls
+    in the fragment and prints the finding. That is the whole point of ADR 0016 §1.
+#}
+            <label class="admin-form__label" for="field-{{ field.property }}">{{ field.label }}{% if field.required %} <span class="admin-form__required" aria-hidden="true">*</span>{% endif %}</label>

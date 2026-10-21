@@ -1,0 +1,10 @@
+{#
+    A `json` column, edited as raw text.
+
+    `spellcheck` IS OFF because this is not prose: a red squiggle under every key name trains an
+    editor to ignore the one under a real typo. It is also the only thing that separates this
+    fragment from `textarea` — the two keys stay apart because ADR 0013 keeps them apart, and
+    because whatever better editor this field eventually gets belongs here and not under prose.
+#}
+{% include 'widget/_label.html.twig' %}
+            <textarea class="admin-form__control" id="field-{{ field.property }}" name="{{ field.property }}" rows="6" spellcheck="false"{% if field.required %} required{% endif %}{% if field.error %} aria-invalid="true" aria-describedby="{{ described }}"{% endif %}>{{ field.value }}</textarea>

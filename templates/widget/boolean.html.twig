@@ -1,0 +1,16 @@
+{#
+    A yes/no column — the core's `boolean`, not its `checkbox` (which is a group over a relation
+    and a different key entirely; ADR 0013 keeps the two apart for exactly this reason).
+
+    THE LABEL WRAPS THE BOX, so this fragment does not include `_label.html.twig`: a checkbox
+    whose caption sits above it on its own line reads as a heading rather than as the thing the
+    box means.
+
+    AN UNCHECKED BOX SENDS NOTHING AT ALL. `FormController::payload()` therefore derives the
+    value from presence, which is what makes unticking one saveable; the `value="1"` here is only
+    the ticked case.
+#}
+            <label class="admin-form__label admin-form__label--inline" for="field-{{ field.property }}">
+                <input class="admin-form__checkbox" type="checkbox" id="field-{{ field.property }}" name="{{ field.property }}" value="1"{% if field.checked %} checked{% endif %}{% if field.error %} aria-invalid="true" aria-describedby="{{ described }}"{% endif %}>
+                {{ field.label }}
+            </label>

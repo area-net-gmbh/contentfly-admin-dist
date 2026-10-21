@@ -1,0 +1,20 @@
+{#
+    A fixed set of options — the `select` alias, the one type whose options the schema really
+    carries (`[{id, name}]`, renamed to `{value, label}` in `FormController::options()`).
+
+    AN OPTIONLESS SELECT NEVER REACHES THIS FRAGMENT. `FormController::fragment()` sends it to
+    `readonly` instead, because an empty dropdown is a control that cannot be used and can still
+    be submitted.
+
+    The empty option exists only where the field is not required — it is how a value gets cleared
+    again.
+#}
+{% include 'widget/_label.html.twig' %}
+            <select class="admin-form__control" id="field-{{ field.property }}" name="{{ field.property }}"{% if field.required %} required{% endif %}{% if field.error %} aria-invalid="true" aria-describedby="{{ described }}"{% endif %}>
+{% if not field.required %}
+                <option value=""></option>
+{% endif %}
+{% for option in field.options %}
+                <option value="{{ option.value }}"{% if option.value == field.value %} selected{% endif %}>{{ option.label }}</option>
+{% endfor %}
+            </select>

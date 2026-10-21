@@ -1,0 +1,11 @@
+{#
+    A numeric value. `integer`, `decimal` and `float` share this one key (ADR 0013), and the core
+    alias in `field.type` is what still tells them apart.
+
+    `step` IS NOT COSMETIC. Without it a browser accepts whole numbers only, so a `decimal` or
+    `float` column would reject the very values it exists to hold — the form looked finished and
+    refused `1,5`. This is the one place where moving the eight plain controls into fragments
+    changes behaviour, and it changes it towards the column.
+#}
+{% include 'widget/_label.html.twig' %}
+            <input class="admin-form__control" type="number" id="field-{{ field.property }}" name="{{ field.property }}" value="{{ field.value }}"{% if field.type in ['decimal', 'float'] %} step="any"{% endif %}{% if field.required %} required{% endif %}{% if field.error %} aria-invalid="true" aria-describedby="{{ described }}"{% endif %}>

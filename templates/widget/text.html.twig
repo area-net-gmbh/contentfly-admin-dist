@@ -1,0 +1,6 @@
+{#
+    A short text value — the `string` alias. `maxlength` is the column's own length, passed
+    through by `WidgetResolver` where the schema states one.
+#}
+{% include 'widget/_label.html.twig' %}
+            <input class="admin-form__control" type="text" id="field-{{ field.property }}" name="{{ field.property }}" value="{{ field.value }}"{% if field.maxlength %} maxlength="{{ field.maxlength }}"{% endif %}{% if field.required %} required{% endif %}{% if field.error %} aria-invalid="true" aria-describedby="{{ described }}"{% endif %}>

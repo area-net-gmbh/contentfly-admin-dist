@@ -1,0 +1,6 @@
+{#
+    A time of day, without a date. Same reasoning as `datetime`: the native control is the floor,
+    002-007-0003 builds on it.
+#}
+{% include 'widget/_label.html.twig' %}
+            <input class="admin-form__control" type="time" id="field-{{ field.property }}" name="{{ field.property }}" value="{{ field.value }}"{% if field.required %} required{% endif %}{% if field.error %} aria-invalid="true" aria-describedby="{{ described }}"{% endif %}>

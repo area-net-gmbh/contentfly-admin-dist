@@ -1,0 +1,9 @@
+{#
+    A long text value — the `textarea` alias, a `text` column in Doctrine.
+
+    Formatting is not part of this fragment. A `textarea` becomes a rich text field only where the
+    entity says so with `#[Admin(rte: true)]` (ADR 0016 §3), and that is its own key and its own
+    fragment.
+#}
+{% include 'widget/_label.html.twig' %}
+            <textarea class="admin-form__control" id="field-{{ field.property }}" name="{{ field.property }}" rows="6"{% if field.required %} required{% endif %}{% if field.error %} aria-invalid="true" aria-describedby="{{ described }}"{% endif %}>{{ field.value }}</textarea>
