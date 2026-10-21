@@ -14,6 +14,7 @@ use Areanet\ContentflyAdmin\Schema\SchemaClient;
 use Areanet\ContentflyAdmin\Schema\ShapingListener;
 use Areanet\ContentflyAdmin\Schema\VersionGuard;
 use Areanet\ContentflyAdmin\View\ColumnBuilder;
+use Areanet\ContentflyAdmin\View\EntityView;
 use Areanet\ContentflyAdmin\View\MenuBuilder;
 use Areanet\ContentflyAdmin\View\TemplateRenderer;
 use Areanet\ContentflyAdmin\View\WidgetRegistry;
@@ -171,6 +172,14 @@ final class AdminManager
 
         $this->app[ColumnBuilder::CONTAINER_KEY] = static function ($app): ColumnBuilder {
             return new ColumnBuilder($app[SchemaClient::CONTAINER_KEY]);
+        };
+
+        $this->app[EntityView::CONTAINER_KEY] = static function ($app): EntityView {
+            return new EntityView(
+                $app[SchemaClient::CONTAINER_KEY],
+                $app[ColumnBuilder::CONTAINER_KEY],
+                $app[WidgetResolver::CONTAINER_KEY]
+            );
         };
 
         $this->app[WidgetRegistry::CONTAINER_KEY] = static function (): WidgetRegistry {

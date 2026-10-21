@@ -86,11 +86,15 @@ final class ColumnBuilder
      *
      * Only the ones that would otherwise pass `LISTABLE_TYPES` are named. The inherited
      * relations — `user`, `userCreated`, `users`, `groups` — are already out by their type, and
-     * repeating them here would be a second list to keep in step with the first.
+     * repeating them here would be a second list to keep in step with the first. The form has to
+     * name them, because it renders relations; they are in `EntityView::INHERITED_RELATIONS`.
+     *
+     * Public because the form excludes the same fields (`EntityView::formFields()`). One list,
+     * two readers — the alternative was a copy that drifts.
      *
      * @var list<string>
      */
-    private const TECHNICAL_PROPERTIES = array(
+    public const TECHNICAL_PROPERTIES = array(
         'created',
         'modified',
         'views',

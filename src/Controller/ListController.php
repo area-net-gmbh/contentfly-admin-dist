@@ -7,7 +7,7 @@ namespace Areanet\ContentflyAdmin\Controller;
 use Areanet\ContentflyAdmin\AdminManager;
 use Areanet\ContentflyAdmin\Asset\Importmap;
 use Areanet\ContentflyAdmin\Schema\SchemaClient;
-use Areanet\ContentflyAdmin\View\ColumnBuilder;
+use Areanet\ContentflyAdmin\View\EntityView;
 use Areanet\ContentflyAdmin\View\MenuBuilder;
 use Areanet\ContentflyAdmin\View\TemplateRenderer;
 use Areanet\PIM\Classes\Api;
@@ -31,10 +31,11 @@ use Symfony\Component\HttpFoundation\Response;
  * calls it a configuration rather than a security boundary — that is about what it protects
  * against, not a licence to leave the back door open.
  *
- * THE COLUMNS AND THE QUERY COME FROM ONE LIST. `ColumnBuilder` decides which fields are shown,
- * and the same list goes into `Api::getList()` as `$properties`, which makes the core select
- * exactly those columns. A field that is not a column is therefore never read from the database
- * — which is what makes the builder's `secret` filter worth anything.
+ * THE COLUMNS AND THE QUERY COME FROM ONE LIST. `EntityView` answers which fields are shown —
+ * with the rules of `ColumnBuilder` behind it — and the same list goes into `Api::getList()` as
+ * `$properties`, which makes the core select exactly those columns. A field that is not a column
+ * is therefore never read from the database — which is what makes the `secret` filter in those
+ * rules worth anything.
  */
 final class ListController
 {
@@ -95,7 +96,7 @@ final class ListController
             );
         }
 
-        $columns = $this->app[ColumnBuilder::CONTAINER_KEY]->build($name);
+        $columns = $this->app[EntityView::CONTAINER_KEY]->listColumns($name);
         $sort      = self::sortProperty($request, $columns);
         $direction = self::direction($request);
         $page      = self::page($request);
