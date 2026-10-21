@@ -1,0 +1,31 @@
+{#
+    One option out of a group, as radio buttons — the `radio` alias.
+
+    WHY NOT A DROPDOWN: the entity asked for this. `radio` and `join` describe the same shape of
+    data, one record out of a target table; the only difference is the `#[PIM\Radio]` attribute,
+    and its single purpose is to say "show these open, not folded away". Rendering a dropdown here
+    would quietly ignore the one instruction the field carries.
+
+    THE GROUP IS ALREADY APPLIED. Both `radio` and `checkbox` accept `PIM\Option`, the shared
+    table of every option of every group, and the field states which group is its own — the
+    filtering happens in `RelationOptions`, not here.
+
+    THERE IS NO EMPTY RADIO BUTTON. A radio group cannot be unticked once a value is set, so a
+    nullable field gets an explicit "nothing chosen" option; without it a value could be changed
+    but never removed.
+#}
+{% include 'widget/_label.html.twig' %}
+            <div class="admin-form__radios"{% if field.error %} role="group" aria-invalid="true" aria-describedby="{{ described }}"{% endif %}>
+{% if not field.required %}
+                <label class="admin-form__label admin-form__label--inline" for="field-{{ field.property }}">
+                    <input class="admin-form__radio" type="radio" id="field-{{ field.property }}" name="{{ field.property }}" value=""{% if field.value == '' %} checked{% endif %}>
+                    <em>nichts gewählt</em>
+                </label>
+{% endif %}
+{% for option in field.options %}
+                <label class="admin-form__label admin-form__label--inline" for="field-{{ field.property }}-{{ loop.index }}">
+                    <input class="admin-form__radio" type="radio" id="field-{{ field.property }}-{{ loop.index }}" name="{{ field.property }}" value="{{ option.value }}"{% if option.value == field.value %} checked{% endif %}{% if field.required and loop.first %} required{% endif %}>
+                    {{ option.label }}
+                </label>
+{% endfor %}
+            </div>

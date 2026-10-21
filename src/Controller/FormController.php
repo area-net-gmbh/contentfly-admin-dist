@@ -12,6 +12,7 @@ use Areanet\ContentflyAdmin\Schema\SchemaClient;
 use Areanet\ContentflyAdmin\View\EntityView;
 use Areanet\ContentflyAdmin\View\FieldError;
 use Areanet\ContentflyAdmin\View\MenuBuilder;
+use Areanet\ContentflyAdmin\View\RelationOptions;
 use Areanet\ContentflyAdmin\View\TemplateRenderer;
 use Areanet\PIM\Classes\Api;
 use Areanet\PIM\Classes\Exceptions\ContentflyException;
@@ -101,15 +102,47 @@ final class FormController
         'time'             => true,
         'json'             => true,
         'select'           => true,
-        'entity'           => false,
-        'entitylist'       => false,
-        'radio'            => false,
-        'checkboxgroup'    => false,
+        'entity'           => true,
+        'entitylist'       => true,
+        'radio'            => true,
+        'checkboxgroup'    => true,
         'file'             => false,
         'filelist'         => false,
         'permissionmatrix' => false,
         'readonly'         => false,
     );
+
+    /**
+     * The fragments whose options are records of another entity, fetched rather than read.
+     *
+     * They are the ones `RelationOptions` is asked about, and the ones that can still end up on
+     * `readonly` after the asking: an empty target table, a target the editor may not read, or
+     * more target records than a list may offer.
+     */
+    private const RELATION_FRAGMENTS = array('entity', 'entitylist', 'radio', 'checkboxgroup');
+
+    /** The fragments that post several values under one property, so `<name>[]`. */
+    private const LIST_FRAGMENTS = array('entitylist', 'checkboxgroup');
+
+    /**
+     * Core aliases that are shown and never offered, whatever widget key they carry.
+     *
+     * BOTH SHARE A KEY WITH A WRITABLE ALIAS, which is why this list exists at all. `onejoin`
+     * sits on `entity` next to `join`, and `joinbidirectional` on `entitylist` next to
+     * `multijoin` — so the widget key alone cannot answer whether a field may be written.
+     *
+     * `onejoin` IS AN OWNED SUB-RECORD, NOT A CHOICE. `OnejoinType::toDatabase()` hands the
+     * submitted value to `doInsert`/`doUpdate` on the *target* entity: it creates or edits that
+     * record. An id picked from a list would not be understood as a reference, it would be read
+     * as the sub-record's field data. Offering a select would therefore be wrong, not merely
+     * unsupported.
+     *
+     * `joinbidirectional` IS NOT WRITABLE AT ALL. `JoinBidirectionalType::toDatabase()` is an
+     * empty method body — the core silently drops anything sent for it. A control over that
+     * would accept input, report success and change nothing, which is the worst of the three
+     * possible answers.
+     */
+    private const SHOWN_ONLY_TYPES = array('onejoin', 'joinbidirectional');
 
     /** @var \Areanet\PIM\Classes\Kernel\ApplicationInterface */
     private $app;
@@ -158,15 +191,23 @@ final class FormController
 
         $fields = $this->app[EntityView::CONTAINER_KEY]->formFields($name);
 
-        if ($request->isMethod('POST')) {
-            return $this->save($request, $name, $id, $language, $fields);
-        }
-
-        if (!$request->isMethod('GET')) {
+        if (!$request->isMethod('POST') && !$request->isMethod('GET')) {
             return new Response('', 405, array('Allow' => 'GET, POST'));
         }
 
-        return $this->show($request, $name, $id, $language, $fields);
+        /*
+         * DECIDED ONCE, FOR BOTH PATHS. A relation field has to be asked about before either
+         * path can act: the renderer needs its options, and the save path needs to know whether
+         * it may be written at all. The method check sits above this so a HEAD or PUT does not
+         * pay for the queries.
+         */
+        $prepared = $this->prepare($request, $fields);
+
+        if ($request->isMethod('POST')) {
+            return $this->save($request, $name, $id, $language, $fields, $prepared);
+        }
+
+        return $this->show($request, $name, $id, $language, $fields, $prepared);
     }
 
     /**
@@ -174,8 +215,14 @@ final class FormController
      *
      * @param list<array<string,mixed>> $fields
      */
-    private function show(Request $request, string $name, ?string $id, ?string $language, array $fields): Response
-    {
+    private function show(
+        Request $request,
+        string $name,
+        ?string $id,
+        ?string $language,
+        array $fields,
+        array $prepared
+    ): Response {
         $record = null;
 
         if ($id !== null) {
@@ -186,7 +233,16 @@ final class FormController
             }
         }
 
-        return $this->render($request, $name, $id, $fields, self::recordValues($fields, $record), 200, null);
+        return $this->render(
+            $request,
+            $name,
+            $id,
+            $fields,
+            $prepared,
+            self::recordValues($fields, $record),
+            200,
+            null
+        );
     }
 
     /**
@@ -235,15 +291,21 @@ final class FormController
      *
      * @param list<array<string,mixed>> $fields
      */
-    private function save(Request $request, string $name, ?string $id, ?string $language, array $fields): Response
-    {
+    private function save(
+        Request $request,
+        string $name,
+        ?string $id,
+        ?string $language,
+        array $fields,
+        array $prepared
+    ): Response {
         if (!FormToken::verify($request)) {
             /*
              * NOT A CORE FINDING, SO IT CARRIES NO FIELD. The token is the admin's own
              * mechanism; `null` for the error entry makes `reject()` show this sentence above
              * the form, which is where it belongs — no single field is wrong here.
              */
-            return $this->reject($request, $name, $id, $fields, array(
+            return $this->reject($request, $name, $id, $fields, $prepared, array(
                 'ok'       => false,
                 'readable' => true,
                 'data'     => null,
@@ -253,7 +315,7 @@ final class FormController
 
         $payload = array(
             'entity' => $name,
-            'data'   => self::payload($fields, $request),
+            'data'   => self::payload($fields, $prepared, $request),
         );
 
         if ($id !== null) {
@@ -278,7 +340,7 @@ final class FormController
         $envelope = Envelope::read($response->getContent(), $response->getStatusCode());
 
         if (!$envelope['ok']) {
-            return $this->reject($request, $name, $id, $fields, $envelope, $language);
+            return $this->reject($request, $name, $id, $fields, $prepared, $envelope, $language);
         }
 
         /*
@@ -336,12 +398,13 @@ final class FormController
         string $name,
         ?string $id,
         array $fields,
+        array $prepared,
         array $envelope,
         ?string $language,
         ?string $override = null
     ): Response {
         $record = $id === null ? null : $this->load($request, $name, $id, $language);
-        $values = self::submittedValues($fields, $request) + self::recordValues($fields, $record);
+        $values = self::submittedValues($fields, $prepared, $request) + self::recordValues($fields, $record);
 
         $message  = $override ?? FieldError::message($envelope['error'], $envelope['readable']);
         $property = $override === null
@@ -353,6 +416,7 @@ final class FormController
             $name,
             $id,
             $fields,
+            $prepared,
             $values,
             422,
             $property === null ? $message : null,
@@ -372,13 +436,14 @@ final class FormController
         string $name,
         ?string $id,
         array $fields,
+        array $prepared,
         array $values,
         int $status,
         ?string $error,
         array $fieldErrors = array()
     ): Response {
         $manager = $this->app[AdminManager::CONTAINER_KEY];
-        $tabs    = self::tabs($fields, $values, $fieldErrors);
+        $tabs    = self::tabs($fields, $prepared, $values, $fieldErrors);
         $base    = $manager->getPrefix().'/form/'.MenuBuilder::entityToUrl($name);
         $token   = FormToken::issue($request);
 
@@ -439,20 +504,36 @@ final class FormController
      *
      * @return array<string,mixed>
      */
-    private static function payload(array $fields, Request $request): array
+    private static function payload(array $fields, array $prepared, Request $request): array
     {
         $submitted = $request->request->all();
         $data      = array();
 
         foreach ($fields as $field) {
-            if (!self::writable($field['widget'])) {
+            $property = $field['property'];
+            $fragment = $prepared[$property]['fragment'] ?? 'readonly';
+
+            if (!self::writableFragment($fragment)) {
                 continue;
             }
 
-            $property = $field['property'];
-
-            if (($field['widget']['widget'] ?? null) === 'boolean') {
+            if ($fragment === 'boolean') {
                 $data[$property] = array_key_exists($property, $submitted);
+                continue;
+            }
+
+            /*
+             * A LIST THAT LOST ITS LAST ENTRY SENDS NOTHING, exactly like an unticked box, so a
+             * list field is derived from presence too. Reading it from the body alone would make
+             * emptying a relation impossible: the absent key would be taken for "unchanged" and
+             * the last choice could never be removed.
+             */
+            if (in_array($fragment, self::LIST_FRAGMENTS, true)) {
+                $value = $submitted[$property] ?? array();
+
+                $data[$property] = is_array($value)
+                    ? array_values(array_filter($value, 'is_string'))
+                    : array();
                 continue;
             }
 
@@ -501,21 +582,32 @@ final class FormController
      *
      * @return array<string,mixed>
      */
-    private static function submittedValues(array $fields, Request $request): array
+    private static function submittedValues(array $fields, array $prepared, Request $request): array
     {
         $submitted = $request->request->all();
         $values    = array();
 
         foreach ($fields as $field) {
-            if (!self::writable($field['widget'])) {
+            $property = $field['property'];
+            $fragment = $prepared[$property]['fragment'] ?? 'readonly';
+
+            if (!self::writableFragment($fragment)) {
                 continue;
             }
 
-            $property = $field['property'];
+            if ($fragment === 'boolean') {
+                $values[$property] = array_key_exists($property, $submitted);
+                continue;
+            }
 
-            $values[$property] = ($field['widget']['widget'] ?? null) === 'boolean'
-                ? array_key_exists($property, $submitted)
-                : ($submitted[$property] ?? null);
+            if (in_array($fragment, self::LIST_FRAGMENTS, true)) {
+                $value = $submitted[$property] ?? array();
+
+                $values[$property] = is_array($value) ? array_values($value) : array();
+                continue;
+            }
+
+            $values[$property] = $submitted[$property] ?? null;
         }
 
         return $values;
@@ -560,7 +652,7 @@ final class FormController
      *
      * @return list<array{name: string, index: int, fields: list<array<string,mixed>>}>
      */
-    private static function tabs(array $fields, array $values, array $errors): array
+    private static function tabs(array $fields, array $prepared, array $values, array $errors): array
     {
         $grouped = array();
 
@@ -584,7 +676,7 @@ final class FormController
         $index = 0;
 
         foreach ($ordered + $grouped as $name => $group) {
-            $controls = self::controls($group, $values, $errors);
+            $controls = self::controls($group, $prepared, $values, $errors);
 
             $tabs[] = array(
                 'name'   => (string) $name,
@@ -619,17 +711,18 @@ final class FormController
      *
      * @return list<array<string,mixed>>
      */
-    private static function controls(array $fields, array $values, array $errors): array
+    private static function controls(array $fields, array $prepared, array $values, array $errors): array
     {
         $controls = array();
 
         foreach ($fields as $field) {
             $widget   = $field['widget'];
-            $raw      = $values[$field['property']] ?? null;
-            $fragment = self::fragment($widget);
+            $property = $field['property'];
+            $raw      = $values[$property] ?? null;
+            $fragment = $prepared[$property]['fragment'] ?? 'readonly';
 
             $controls[] = array(
-                'property'  => $field['property'],
+                'property'  => $property,
                 'label'     => $field['label'],
                 'widget'    => $fragment,
                 /*
@@ -640,10 +733,12 @@ final class FormController
                 'type'      => $widget['type'] ?? null,
                 'required'  => ($widget['required'] ?? false) === true,
                 'maxlength' => $widget['maxlength'] ?? null,
-                'options'   => self::options($widget),
+                'options'   => $prepared[$property]['options'] ?? array(),
                 'value'     => self::value($raw, $fragment),
+                /* Only the list fragments read this; for every other one the template ignores it. */
+                'values'    => self::selected($raw),
                 'checked'   => self::checked($raw),
-                'error'     => $errors[$field['property']] ?? null,
+                'error'     => $errors[$property] ?? null,
             );
         }
 
@@ -665,6 +760,10 @@ final class FormController
             return 'readonly';
         }
 
+        if (in_array($widget['type'] ?? null, self::SHOWN_ONLY_TYPES, true)) {
+            return 'readonly';
+        }
+
         $key = (string) ($widget['widget'] ?? '');
 
         if (!isset(self::FRAGMENTS[$key])) {
@@ -680,19 +779,62 @@ final class FormController
     }
 
     /**
-     * Whether one field is written when the form is submitted.
+     * Whether a field rendered with this fragment is written when the form is submitted.
      *
      * READ OFF THE FRAGMENT, NOT THE WIDGET KEY, so the two can never disagree: whatever reason
      * sent a field to `readonly` — the attribute, a computed value, an optionless select, an
-     * unknown key — also takes it out of the save path. `payload()` and `submittedValues()` are
-     * the two callers, and they are the reason this is one function and not a condition written
-     * twice.
-     *
-     * @param array<string,mixed> $widget
+     * alias the core never writes, a target table too large to offer — also takes it out of the
+     * save path. That is why the fragment is decided once per request in `prepare()` and handed
+     * to the renderer and to the save path alike, instead of being worked out twice from
+     * different information.
      */
-    private static function writable(array $widget): bool
+    private static function writableFragment(string $fragment): bool
     {
-        return self::FRAGMENTS[self::fragment($widget)];
+        return self::FRAGMENTS[$fragment] ?? false;
+    }
+
+    /**
+     * The fragment and the options of every field, decided once per request.
+     *
+     * THE ONE PLACE THAT ASKS ABOUT RELATIONS. A relation field needs a query to know whether it
+     * can be offered at all, and the answer has to reach two different readers: the renderer,
+     * which draws the control, and the save path, which decides what may be written. Working it
+     * out separately in both is how a form grows a field that is displayed and still saved.
+     *
+     * @param list<array<string,mixed>> $fields
+     *
+     * @return array<string,array{fragment: string, options: list<array{value: string, label: string}>}>
+     */
+    private function prepare(Request $request, array $fields): array
+    {
+        $provider = $this->app[RelationOptions::CONTAINER_KEY];
+        $prepared = array();
+
+        foreach ($fields as $field) {
+            $widget   = $field['widget'];
+            $fragment = self::fragment($widget);
+            $options  = self::options($widget);
+
+            if (in_array($fragment, self::RELATION_FRAGMENTS, true)) {
+                $relation = $provider->forField($widget, $request);
+
+                /*
+                 * MORE TARGET RECORDS THAN A LIST MAY OFFER IS SHOWN, NOT TRUNCATED. A list cut
+                 * off at the limit would hide records without saying so, and an editor would
+                 * conclude the missing one does not exist. The search for that case is task
+                 * 002-007-0007; until then the honest answer is the value without a control.
+                 */
+                if ($relation === null || $relation['total'] > RelationOptions::LIMIT) {
+                    $fragment = 'readonly';
+                } else {
+                    $options = $relation['options'];
+                }
+            }
+
+            $prepared[$field['property']] = array('fragment' => $fragment, 'options' => $options);
+        }
+
+        return $prepared;
     }
 
     /**
@@ -755,11 +897,72 @@ final class FormController
             return $value ? '1' : '0';
         }
 
+        /*
+         * A RELATION ARRIVES AS A VALUE OBJECT, A DATETIME AS AN ARRAY, and the fragment decides
+         * which of the two is being looked at — the keys alone would be a guess.
+         *
+         * THE RELATION IS AN OBJECT ON ONE PATH AND AN ARRAY ON THE OTHER. `JoinType` answers
+         * the target's own value object, a `stdClass`, when the editor may read it, and the bare
+         * array `['id' => …, 'pim_blocked' => true]` when they may not. Both have to work, or a
+         * relation the editor cannot read would lose its selection on save.
+         */
+        if (in_array($fragment, self::RELATION_FRAGMENTS, true)) {
+            return self::relationId($value) ?? '';
+        }
+
         if (is_array($value)) {
             return self::datetime($value, $fragment);
         }
 
         return is_scalar($value) ? (string) $value : '';
+    }
+
+    /**
+     * The id out of one relation entry, or `null` when there is none to read.
+     *
+     * @param mixed $entry
+     */
+    private static function relationId($entry): ?string
+    {
+        if (is_object($entry)) {
+            $entry = $entry->id ?? null;
+        } elseif (is_array($entry)) {
+            $entry = $entry['id'] ?? null;
+        }
+
+        return is_scalar($entry) && (string) $entry !== '' ? (string) $entry : null;
+    }
+
+    /**
+     * The ids a list fragment has ticked.
+     *
+     * TWO SHAPES REACH THIS, and both have to work. A record read from the core answers a list of
+     * `['id' => …]` entries; a rejected submission answers the plain list of ids that was posted
+     * (`submittedValues()`), because that is what the browser sent. Handling only the first would
+     * make a rejected form come back with every choice cleared — the editor would lose the
+     * selection along with the error message.
+     *
+     * @param mixed $value
+     *
+     * @return list<string>
+     */
+    private static function selected($value): array
+    {
+        if (!is_array($value)) {
+            return array();
+        }
+
+        $ids = array();
+
+        foreach ($value as $entry) {
+            $id = self::relationId($entry);
+
+            if ($id !== null) {
+                $ids[] = $id;
+            }
+        }
+
+        return $ids;
     }
 
     /**

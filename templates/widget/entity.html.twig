@@ -1,0 +1,15 @@
+{#
+    A reference to one other record — the `join` alias.
+
+    IT DELEGATES TO `select`, AND THAT IS THE POINT. Choosing one record out of a list and
+    choosing one value out of a fixed list are the same act for the person doing it; only where
+    the options come from differs, and that is already answered before this fragment runs
+    (`RelationOptions`, ADR 0016 §2). Two files with the same markup would be two files to keep
+    in step. It stays its own key because ADR 0013 keeps it apart: a project overriding the
+    element for entity references must not change every fixed option list with it.
+
+    `onejoin` NEVER ARRIVES HERE even though it shares this key. The core writes it through
+    `doInsert`/`doUpdate` on the *target* record (`OnejoinType::toDatabase()`), so it is an owned
+    sub-record and not a choice; `FormController::fragment()` sends it to `readonly`.
+#}
+{% include 'widget/select.html.twig' %}

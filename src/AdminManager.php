@@ -17,6 +17,7 @@ use Areanet\ContentflyAdmin\Schema\VersionGuard;
 use Areanet\ContentflyAdmin\View\ColumnBuilder;
 use Areanet\ContentflyAdmin\View\EntityView;
 use Areanet\ContentflyAdmin\View\MenuBuilder;
+use Areanet\ContentflyAdmin\View\RelationOptions;
 use Areanet\ContentflyAdmin\View\TemplateRenderer;
 use Areanet\ContentflyAdmin\View\WidgetRegistry;
 use Areanet\ContentflyAdmin\View\WidgetResolver;
@@ -181,6 +182,10 @@ final class AdminManager
                 $app[ColumnBuilder::CONTAINER_KEY],
                 $app[WidgetResolver::CONTAINER_KEY]
             );
+        };
+
+        $this->app[RelationOptions::CONTAINER_KEY] = static function ($app): RelationOptions {
+            return new RelationOptions($app);
         };
 
         $this->app[WidgetRegistry::CONTAINER_KEY] = static function (): WidgetRegistry {

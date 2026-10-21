@@ -1,0 +1,13 @@
+{#
+    References to several other records — the `multijoin` alias.
+
+    IT DELEGATES TO `checkboxgroup` for the reason `entity` delegates to `select`: picking several
+    records and ticking several options are one act, and the options are already resolved before
+    the fragment runs. A `<select multiple>` was the alternative and lost — it hides that more
+    than one choice is possible, and it needs a modifier key that nobody is told about.
+
+    TWO OF THE THREE ALIASES ON THIS KEY NEVER ARRIVE HERE. `joinbidirectional` is not writable
+    at all — `JoinBidirectionalType::toDatabase()` is an empty method, the core ignores every
+    write — and `virtualjoin` is computed. Both are sent to `readonly` and are shown instead.
+#}
+{% include 'widget/checkboxgroup.html.twig' %}

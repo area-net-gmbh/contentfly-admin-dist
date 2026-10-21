@@ -1,0 +1,21 @@
+{#
+    Several options out of a group, as checkboxes — the `checkbox` alias.
+
+    `checkbox` IS NOT `boolean`. The core's two names are almost the same and mean entirely
+    different things: `boolean` is a yes/no column, this is a many-to-many relation over a target
+    table. ADR 0013 keeps them as separate widget keys for exactly this reason.
+
+    THE NAME CARRIES `[]` because several boxes post under one property, and because an empty
+    list has to arrive as an empty list. `FormController::payload()` therefore derives the value
+    from presence, the same way it does for a single checkbox: without that, unticking the last
+    box could never be saved.
+#}
+{% include 'widget/_label.html.twig' %}
+            <div class="admin-form__checkboxes"{% if field.error %} role="group" aria-invalid="true" aria-describedby="{{ described }}"{% endif %}>
+{% for option in field.options %}
+                <label class="admin-form__label admin-form__label--inline" for="field-{{ field.property }}-{{ loop.index }}">
+                    <input class="admin-form__checkbox" type="checkbox" id="field-{{ field.property }}-{{ loop.index }}" name="{{ field.property }}[]" value="{{ option.value }}"{% if option.value in field.values %} checked{% endif %}>
+                    {{ option.label }}
+                </label>
+{% endfor %}
+            </div>
