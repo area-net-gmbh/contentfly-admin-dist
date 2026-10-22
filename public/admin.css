@@ -963,8 +963,9 @@ li {
 /*
  * THE PREVIEW CELL HAS ITS SIZE BEFORE IT HAS CONTENT (story 003-001-0003).
  *
- * The thumbnails arrive in 003-001-0004. Fixing the box here means the rows do not change height
- * when they do, and a slow or missing derivative does not make the table jump while it loads.
+ * Fixing the box here means a slow, missing or lazily loaded derivative does not make the table
+ * jump while it arrives — and the image box and the label box are the same size, so a folder of
+ * mixed types has one row height and not two.
  */
 .admin-files__cell--preview {
     width: 4rem;
@@ -977,11 +978,24 @@ li {
     width: 3rem;
     height: 3rem;
     border-radius: 3px;
+    /* Behind a transparent or still-loading image, so the box is never a hole in the table. */
+    background: var(--admin-rule);
     object-fit: cover;
 }
 
-.admin-files__preview--placeholder {
-    background: var(--admin-rule);
+/*
+ * THE LABEL FOR A FILE WITHOUT A PREVIEW. It uses the same box as the image so the rows stay one
+ * height, and it is centred text rather than an icon because the set of stored types is open —
+ * four letters of the subtype say more than a generic document glyph.
+ */
+.admin-files__preview--badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    color: var(--admin-muted);
 }
 
 .admin-files__empty {

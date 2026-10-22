@@ -78,6 +78,26 @@ final class FileController
     /** What a cell shows when the value is null or empty — never an empty-looking table. */
     private const EMPTY_CELL = '—';
 
+    /**
+     * The core's own file route. Fixed, not configurable: `file` is one of the prefixes the core
+     * mounts itself and the admin refuses to be mounted on (`AdminManager::RESERVED_PREFIXES`).
+     */
+    private const CORE_FILE_ROUTE = '/file/get';
+
+    /**
+     * The types a derivative can be made from.
+     *
+     * THE LIST IS THE CORE'S, NOT A GUESS. `Processing\Image::getMimeTypes()` registers exactly
+     * these three; for anything else `Processing::getInstance()` hands back the `Standard`
+     * processor, and `FileController::getAction` then raises `FileNotFoundException`
+     * (Schema-Vertrag 8.3). Asking for a size on a fourth type is therefore not a degraded
+     * preview, it is a 500 per row — which is why `image/svg+xml` and `image/webp` belong on the
+     * icon side even though their names say image.
+     *
+     * @var list<string>
+     */
+    private const THUMBNAILABLE = array('image/jpeg', 'image/gif', 'image/png');
+
     /** @var \Areanet\PIM\Classes\Kernel\ApplicationInterface */
     private $app;
 
@@ -156,6 +176,33 @@ final class FileController
 
         $base = $manager->getPrefix().'/files/';
 
+        $files = self::rows($records, $manager->getThumbnailAlias());
+
+        /*
+         * THE FALLBACK IS THE BROWSER'S, AND IT HAS TO BE (Schema-Vertrag L25).
+         *
+         * Whether `thumbnailAlias` names an existing row cannot be found out from here. The rows
+         * are `PIM\ThumbnailSetting`, the installer marks both of its defaults `isIntern`, and
+         * `Api::getList()` hard-codes `isIntern = false` (`Api.php:1292`) — so the one read path
+         * this package uses can never see them, whatever the editor's permissions. Measured, not
+         * assumed: a list call for `pim_list` comes back empty on an installation that has it.
+         *
+         * Reaching past `Api` into the entity manager would answer the question and would also be
+         * the first place in this package to do it; "pure API consumer" is what the project is.
+         * So the question is left where it is answerable: the derivative either arrives or it
+         * does not, and the browser is what finds out. `admin/file-preview` swaps such an image
+         * for the original — which also covers the cases a lookup would have missed, a row that
+         * exists but cannot be applied to this particular file among them.
+         */
+        $controllers = array();
+
+        foreach ($files as $file) {
+            if ($file['preview'] !== null) {
+                $controllers['admin-file-preview'] = 'admin/file-preview';
+                break;
+            }
+        }
+
         $html = $this->app[TemplateRenderer::CONTAINER_KEY]->render('files.html.twig', array(
             'title'      => 'Dateien — '.$manager->getTitle(),
             'stylesheet' => $manager->assetUrl('admin.css'),
@@ -166,7 +213,8 @@ final class FileController
             'trail'      => $tree === null ? array() : self::trail($tree, $folder, $base),
             'rootUrl'    => $base,
             'isRoot'     => $folder === null,
-            'files'      => self::rows($records),
+            'files'       => $files,
+            'controllers' => $controllers,
             'pagination' => array(
                 'page'    => $page,
                 'pages'   => $pages,
@@ -305,22 +353,73 @@ final class FileController
     }
 
     /** One row per file, formatted — the template receives no raw values to format itself. */
-    private static function rows(array $records): array
+    private static function rows(array $records, string $alias): array
     {
         $rows = array();
 
         foreach ($records as $record) {
             $values = is_array($record) ? $record : (array) $record;
 
+            $id   = (string) ($values['id'] ?? '');
+            $name = (string) ($values['name'] ?? '');
+            $type = (string) ($values['type'] ?? '');
+
             $rows[] = array(
-                'id'   => (string) ($values['id'] ?? ''),
-                'name' => ($values['name'] ?? '') === '' ? self::EMPTY_CELL : (string) $values['name'],
-                'type' => ($values['type'] ?? '') === '' ? self::EMPTY_CELL : (string) $values['type'],
-                'size' => self::humanSize($values['size'] ?? null),
+                'id'      => $id,
+                'name'    => $name === '' ? self::EMPTY_CELL : $name,
+                'type'    => $type === '' ? self::EMPTY_CELL : $type,
+                'size'    => self::humanSize($values['size'] ?? null),
+                'preview'  => self::preview($id, $name, $type, $alias),
+                'original' => self::preview($id, $name, $type, null),
+                'badge'    => self::badge($type),
             );
         }
 
         return $rows;
+    }
+
+    /**
+     * One address of a file: the derivative with an alias, the stored original without one.
+     *
+     * `null` MEANS "SHOW THE BADGE INSTEAD" and happens in exactly one case: the file is not one
+     * of the three types a derivative can be made from. For those the core answers a size request
+     * with a 500, so not asking is the whole point (ADR 0020).
+     *
+     * THE TRAILING SEGMENT IS COSMETIC. The record is found by `{id}` alone (Schema-Vertrag 8.1);
+     * the name only makes the address readable, so it is encoded and never trusted to route.
+     */
+    private static function preview(string $id, string $name, string $type, ?string $alias): ?string
+    {
+        if ($id === '' || !in_array($type, self::THUMBNAILABLE, true)) {
+            return null;
+        }
+
+        $tail = $name === '' ? 'datei' : rawurlencode($name);
+
+        if ($alias === null) {
+            return self::CORE_FILE_ROUTE.'/'.rawurlencode($id).'/'.$tail;
+        }
+
+        return self::CORE_FILE_ROUTE.'/'.rawurlencode($id).'/s-'.rawurlencode($alias).'/'.$tail;
+    }
+
+    /**
+     * The short label a file without a preview shows in the preview box.
+     *
+     * A LABEL AND NOT AN ICON FILE, because the set of types is open: a project can store
+     * anything, and an icon set would either need a file per type or a generic image that says
+     * less than the four letters it replaces. The subtype is what distinguishes them.
+     *
+     * AN UNKNOWN OR EMPTY TYPE STILL GETS SOMETHING. An empty box is indistinguishable from a
+     * preview that failed to load, and that is the one reading this must not have.
+     */
+    private static function badge(string $type): string
+    {
+        $subtype = strtolower(substr($type, (int) strpos($type, '/') + 1));
+        /* `svg+xml` and `vnd.openxmlformats-…` carry their family after a separator. */
+        $subtype = preg_replace('#[^a-z0-9].*$#', '', $subtype) ?? '';
+
+        return $subtype === '' ? '?' : strtoupper(substr($subtype, 0, 4));
     }
 
     /**

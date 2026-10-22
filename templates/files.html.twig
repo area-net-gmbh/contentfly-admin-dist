@@ -18,9 +18,20 @@
     column is then left out and the file list stays (ADR 0019, additive masking). It is not an
     error state and must not look like one.
 
-    THE PREVIEW COLUMN IS A PLACEHOLDER AS OF 003-001-0003. Thumbnails arrive in 003-001-0004,
-    which is also where it is decided what a file that is not an image shows instead. The column
-    exists already so the row height does not change when they do.
+    THE PREVIEW IS EITHER AN IMAGE OR A LABEL, never an empty box (003-001-0004). `file.preview`
+    is an address for the three types a derivative can be made from and `null` for everything
+    else; `file.badge` carries the short label those show instead. A file whose preview fails to
+    load and a file that was never going to have one must not look the same.
+
+    `loading="lazy"` IS NOT COSMETIC HERE. The core builds a derivative synchronously on first
+    request, so a folder of fifty images would otherwise have the browser ask for fifty of them at
+    once. Deferring the ones below the fold spreads that over the scrolling instead.
+
+    THE FALLBACK TO THE ORIGINAL IS THE BROWSER'S JOB. Whether the configured alias names an
+    existing row cannot be found out from the package (Schema-Vertrag L25), so the derivative is
+    simply requested and `admin/file-preview` swaps in `file.original` if it does not arrive.
+    Without that module the page is unchanged except that a failed derivative stays a broken
+    image — it upgrades the behaviour, it is not what makes previews work.
 #}{% extends 'layout.html.twig' %}
 
 {% block bodyAttributes %} class="admin"{% endblock %}
@@ -90,7 +101,15 @@
 {% for file in files %}
                     <tr class="admin-files__row">
                         <td class="admin-files__cell admin-files__cell--preview">
-                            <span class="admin-files__preview admin-files__preview--placeholder" aria-hidden="true"></span>
+{% if file.preview %}
+                            <img class="admin-files__preview" src="{{ file.preview }}" alt=""
+                                 loading="lazy" decoding="async" width="48" height="48"
+                                 data-controller="admin-file-preview"
+                                 data-admin-file-preview-fallback-value="{{ file.original }}">
+{% else %}
+                            <span class="admin-files__preview admin-files__preview--badge"
+                                  role="img" aria-label="{{ file.type }}">{{ file.badge }}</span>
+{% endif %}
                         </td>
                         <td class="admin-files__cell">{{ file.name }}</td>
                         <td class="admin-files__cell">{{ file.type }}</td>

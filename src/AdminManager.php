@@ -70,6 +70,7 @@ final class AdminManager
         'title'     => 'Contentfly Admin',
         'entities'  => [],
         'assetPath' => '',
+        'thumbnailAlias' => 'pim_list',
     ];
 
     /**
@@ -102,6 +103,9 @@ final class AdminManager
     /** URL path of the static asset copy; empty means "serve through the route". */
     private string $assetPath;
 
+    /** Alias of the `PIM\ThumbnailSetting` row the file manager's previews are built from. */
+    private string $thumbnailAlias;
+
     /**
      * @param array<string,mixed> $options See self::DEFAULTS for the accepted keys.
      *
@@ -125,6 +129,7 @@ final class AdminManager
         $this->title     = self::validateTitle($options['title']);
         $this->entities  = self::validateEntities($options['entities']);
         $this->assetPath = self::validateAssetPath($options['assetPath'], $this->prefix);
+        $this->thumbnailAlias = self::validateThumbnailAlias($options['thumbnailAlias']);
 
         $this->registerServices();
         $this->mountRoutes();
@@ -596,6 +601,50 @@ final class AdminManager
      *
      * @throws \InvalidArgumentException on a path that cannot work
      */
+    /**
+     * The thumbnail alias the file manager previews with.
+     *
+     * `pim_list` BY DEFAULT, AND THAT IS A MEASURED CHOICE. `appcms:install` creates exactly two
+     * rows — `pim_list` at 200x200 with `doCut`, and `pim_small` at 320 wide with no height. The
+     * cut one is the right default for a table: every preview comes back at the same size, so the
+     * rows cannot shift because one image is portrait. `pim_small` would hand back a different
+     * height per image.
+     *
+     * A PROJECT MAY NAME ANOTHER ONE, because the rows are data and a project can add its own.
+     * The schema does not say which aliases exist (Schema-Vertrag L25), so this cannot be derived
+     * and has to be configurable.
+     */
+    public function getThumbnailAlias(): string
+    {
+        return $this->thumbnailAlias;
+    }
+
+    /**
+     * @param mixed $alias
+     */
+    private static function validateThumbnailAlias($alias): string
+    {
+        if (!is_string($alias) || $alias === '') {
+            throw new \InvalidArgumentException('The option "thumbnailAlias" must be a non-empty string, for example "pim_list".');
+        }
+
+        /*
+         * IT BECOMES A PATH SEGMENT, so it may not carry a slash or a dot-dot. The core looks the
+         * value up as a database alias and would not find such a row — but the string would
+         * already have travelled through the URL by then, and an address built from
+         * unvalidated configuration is the shape of ADR 0007's asset-path rule for the same
+         * reason.
+         */
+        if (preg_match('#^[A-Za-z0-9_-]+$#', $alias) !== 1) {
+            throw new \InvalidArgumentException(sprintf(
+                'The thumbnail alias "%s" must consist of letters, digits, underscores and hyphens only.',
+                $alias
+            ));
+        }
+
+        return $alias;
+    }
+
     private static function validateAssetPath($assetPath, string $prefix): string
     {
         if ($assetPath === '' || $assetPath === null) {
