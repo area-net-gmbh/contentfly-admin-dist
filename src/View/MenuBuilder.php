@@ -6,6 +6,7 @@ namespace Areanet\ContentflyAdmin\View;
 
 use Areanet\ContentflyAdmin\AdminManager;
 use Areanet\ContentflyAdmin\Auth\PermissionView;
+use Areanet\ContentflyAdmin\Controller\FileController;
 
 /**
  * The admin's main menu, built from the schema.
@@ -36,6 +37,20 @@ use Areanet\ContentflyAdmin\Auth\PermissionView;
  * THE WHITELIST STAYS THE OUTER BOUND. The permission is applied *within*
  * `AdminManager::getEntities()`, never beside it — a read permission on an entity the project
  * did not release still produces no entry (ADR 0005).
+ *
+ * ONE ENTRY IS NOT AN ENTITY, as of story 003-001 — and it is the one exception to everything
+ * above. `PIM\File` and `PIM\Folder` get no generic list entry; in their place stands a single
+ * "Dateien" entry pointing at the file manager (ADR 0020). Two menu ways to the same files,
+ * one of them poorer, is the thing that decision avoids.
+ *
+ * The entry still obeys both bounds: it appears only where `PIM\File` is released *and*
+ * readable, at the position the whitelist puts `PIM\File` in, so the configured order still
+ * decides where it sits. The generic route stays reachable for whoever types it — removing it
+ * would mean a special case for one entity inside the schema-driven controller.
+ *
+ * It takes the two entity names from `FileController`, which owns the function and is the only
+ * other place that must agree about them. Repeating the two strings here is how a menu and a
+ * controller start disagreeing about which entity the file manager covers.
  */
 final class MenuBuilder
 {
@@ -84,6 +99,37 @@ final class MenuBuilder
                 continue;
             }
 
+            /*
+             * THE FOLDERS NEVER GET AN ENTRY OF THEIR OWN. They are the file manager's left-hand
+             * column, not a table an editor maintains — and a second entry leading to the same
+             * tree is exactly the duplication ADR 0020 removes.
+             */
+            if ($entity === FileController::ENTITY_FOLDER) {
+                continue;
+            }
+
+            /*
+             * THE FILE MANAGER TAKES `PIM\File`'s PLACE rather than being appended, so the
+             * whitelist keeps deciding the order of the menu. Both bounds still hold: this line
+             * is only reached when the entity is released (it comes from `getEntities()`) and
+             * readable (checked above).
+             *
+             * THE TRAILING SLASH IS NOT COSMETIC. `CustomControllerProvider::connect()` registers
+             * a route as `'/'.$route`, so a mount at `<prefix>/files` with an empty route name
+             * answers at `<prefix>/files/` — the same shape `AdminController` has at `<prefix>/`.
+             * Linking the slashless form would rely on a trailing-slash redirect that does not
+             * exist for the POST half of the `match()`.
+             */
+            if ($entity === FileController::ENTITY_FILE) {
+                $items[] = array(
+                    'entity' => $entity,
+                    'label'  => 'Dateien',
+                    'url'    => $this->manager->getPrefix().'/files/',
+                );
+
+                continue;
+            }
+
             $items[] = array(
                 'entity' => $entity,
                 'label'  => $entity,
@@ -97,10 +143,13 @@ final class MenuBuilder
     /**
      * The URL segment that addresses one entity.
      *
-     * The label stays the schema name untouched: `tools/harness-admin-pruefen.php` requires
-     * every entity name of the schema to appear in the page body, and a friendlier label is a
-     * question of its own — it would need a source (schema, translation) that does not exist
-     * yet.
+     * The label stays the schema name untouched, because a friendlier label is a question of its
+     * own — it would need a source (schema, translation) that does not exist yet.
+     *
+     * `tools/harness-admin-pruefen.php` used to require *every* entity name of the schema in the
+     * page body. Since story 003-001 that is no longer true for `PIM\File` and `PIM\Folder`:
+     * they have no generic entry any more (ADR 0020), and the gate knows about the two
+     * exceptions.
      */
     public static function entityToUrl(string $entity): string
     {

@@ -1,0 +1,16 @@
+{#
+    The file manager (ADR 0020).
+
+    EMPTY ON PURPOSE AS OF STORY 003-001-0002. This task mounts the route and closes it off;
+    the folder tree and the file list arrive in 003-001-0003, the preview in 003-001-0004 and
+    the write paths in 003-001-0005. The template exists already so the route has something to
+    render that is a page of the admin rather than a bare status code.
+#}{% extends 'layout.html.twig' %}
+
+{% block bodyAttributes %} class="admin"{% endblock %}
+
+{% block content %}
+<main class="admin__main admin-files">
+    <h1>Dateien</h1>
+</main>
+{% endblock %}

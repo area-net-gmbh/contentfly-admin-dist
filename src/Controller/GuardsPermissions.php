@@ -14,11 +14,15 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * The permission check that sits next to every whitelist check (ADR 0019).
  *
- * ONE QUESTION, FOUR PLACES. `in_array($name, $manager->getEntities())` is written identically in
- * `ListController`, `FormController`, `OptionsController` and `BulkController`, and a permission
- * belongs beside each of them. Hiding an entry in the menu is tidiness; this is the part that
- * closes the data. Whoever adds a fifth entry point adds both checks or neither — which is why
- * they read the same in all four.
+ * ONE QUESTION, FIVE PLACES. The whitelist check is written identically in `ListController`,
+ * `FormController`, `OptionsController`, `BulkController` and — since story 003-001 —
+ * `FileController`, and a permission belongs beside each of them. Hiding an entry in the menu is
+ * tidiness; this is the part that closes the data. Whoever adds a sixth entry point adds both
+ * checks or neither — which is why they read the same in all five.
+ *
+ * The first four ask `in_array($name, …)` about an entity taken from the URL. `FileController`
+ * asks about a constant, because the file manager is a function rather than a table and has no
+ * entity placeholder — the check is the same one, about a name it did not get from the request.
  *
  * IT REFUSES BEFORE THE CORE IS ASKED. The core would refuse too — `Api::getList()` asks
  * `Permission::isReadable()` itself, and the package already catches that answer

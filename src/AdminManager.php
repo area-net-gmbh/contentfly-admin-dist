@@ -11,6 +11,7 @@ use Areanet\ContentflyAdmin\Controller\AdminController;
 use Areanet\ContentflyAdmin\Command\PublishAssetsCommand;
 use Areanet\ContentflyAdmin\Controller\AssetController;
 use Areanet\ContentflyAdmin\Controller\BulkController;
+use Areanet\ContentflyAdmin\Controller\FileController;
 use Areanet\ContentflyAdmin\Controller\FormController;
 use Areanet\ContentflyAdmin\Controller\ListController;
 use Areanet\ContentflyAdmin\Controller\OptionsController;
@@ -427,6 +428,34 @@ final class AdminManager
         $this->app['routeManager']
             ->mount($this->prefix.'/bulk', BulkController::class)
             ->match('{entity}', true, 'bulkAction');
+
+        /*
+         * THE FILE MANAGER GETS A MOUNT OF ITS OWN, like everything else under the prefix — one
+         * mount binds one controller class. Its own path segment is ADR 0012, applied by
+         * ADR 0020.
+         *
+         * NO ENTITY PLACEHOLDER, unlike the five mounts above. The file manager is not a
+         * schema-driven view: it works against `PIM\File` and `PIM\Folder` and nothing else,
+         * so the names are constants in `FileController` rather than a segment somebody could
+         * put another entity into. The whitelist is still checked there (ADR 0005).
+         *
+         * NO FOLDER PLACEHOLDER EITHER, and that is the decision of ADR 0020: a placeholder
+         * matches a single segment (ADR 0007), so a folder tree of arbitrary depth is not
+         * addressable through the path. The folder travels in the query string, the way the
+         * list carries its state (ADR 0018).
+         *
+         * `match()` AND NOT `get()`, for the reason the form and the bulk actions state: routes
+         * within one provider are keyed by their path, so a `post()` written next to a `get()`
+         * on the same path would replace it instead of adding to it — silently. Renaming,
+         * moving and deleting arrive in story 003-001-0005 and must not take this route away.
+         *
+         * `isSecure = true`: reading files goes through `Api::getList()`, which asks
+         * `Permission::isReadable()` about the `auth.user` that only a guarded main request
+         * sets.
+         */
+        $this->app['routeManager']
+            ->mount($this->prefix.'/files', FileController::class)
+            ->match('', true, 'filesAction');
 
         $this->app['routeManager']
             ->mount($this->prefix.'/_asset', AssetController::class)
