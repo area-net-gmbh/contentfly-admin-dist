@@ -10,6 +10,7 @@ use Areanet\ContentflyAdmin\Schema\SchemaClient;
 use Areanet\ContentflyAdmin\View\ColumnBuilder;
 use Areanet\ContentflyAdmin\View\EntityView;
 use Areanet\ContentflyAdmin\View\MenuBuilder;
+use Areanet\ContentflyAdmin\View\RelationOptions;
 use Areanet\ContentflyAdmin\View\TemplateRenderer;
 use Areanet\PIM\Classes\Api;
 use Areanet\PIM\Classes\Language;
@@ -53,6 +54,23 @@ final class ListController
 
     /** What a cell shows when the value is null or empty — never an empty-looking table. */
     private const EMPTY_CELL = '—';
+
+    /**
+     * The filterable types whose control is a list of existing records.
+     *
+     * A subset of `EntityView::FILTERABLE_TYPES` — the ones that need `RelationOptions` to say
+     * what can be chosen. `boolean` and `integer` carry their own range and need nothing.
+     *
+     * @var list<string>
+     */
+    private const RELATION_TYPES = array(
+        'join',
+        'multijoin',
+        'checkbox',
+    );
+
+    /** The relation filter value that asks for the records where the relation is not set. */
+    private const RELATION_UNSET = '-1';
 
     /** @var \Areanet\PIM\Classes\Kernel\ApplicationInterface */
     private $app;
@@ -102,9 +120,13 @@ final class ListController
         $direction = self::direction($request);
         $page      = self::page($request);
 
+        $filterDefs = $this->app[EntityView::CONTAINER_KEY]->listFilters($name);
+        $selected   = self::selectedFilters($request, $filterDefs);
+        $where      = self::where($selected, $filterDefs);
+
         $result = (new Api($this->app, $request))->getList(
             $name,
-            null,
+            $where,
             $sort === null ? null : array($sort => $direction),
             null,
             array_column($columns, 'property'),
@@ -137,6 +159,16 @@ final class ListController
         $formBase = $manager->getPrefix().'/form/'.MenuBuilder::entityToUrl($name);
         $query    = array('lang' => Language::normalise($request->query->get('lang')));
 
+        /*
+         * THE FILTER TRAVELS WITH EVERY OTHER ADDRESS OF THIS PAGE. It sits in `$query`, which is
+         * the base of the sort links and the pager, so re-sorting or paging keeps the filter and
+         * a filtered view stays one sendable link (ADR 0018 §2). The form that sets the filter
+         * does the opposite and deliberately drops `page` — see `filterForm()`.
+         */
+        if ($selected !== array()) {
+            $query['filter'] = $selected;
+        }
+
         /* `dir` only says something next to a `sort`; on its own it would be noise in the URL. */
         $order = $query + array('sort' => $sort, 'dir' => $sort === null ? null : strtolower($direction));
 
@@ -150,6 +182,7 @@ final class ListController
             'columns'    => self::sortableColumns($columns, $base, $query, $sort, $direction, $page),
             'rows'       => self::rows($records, $columns, $formBase),
             'newUrl'     => $formBase,
+            'filterForm' => $this->filterForm($filterDefs, $selected, $base, $query, $sort, $direction, $request),
             'pagination' => array(
                 'page'    => $page,
                 'pages'   => $pages,
@@ -239,6 +272,183 @@ final class ListController
     }
 
     /**
+     * The filter values from the URL, keyed by property — only the ones this list offers.
+     *
+     * AN UNKNOWN PARAMETER IS DROPPED HERE AND NEVER REACHES THE CORE, and that is the opposite
+     * of what the core does with it: `Api::getList()` skips a `where` entry whose field it does
+     * not know (`Api.php:1339-1342`) and answers as if nothing had been asked. Passed on, a
+     * mistyped `?filter[aktive]=true` would therefore come back as the unfiltered list and look
+     * like a filter that found everything. Dropped here, the reader at least gets the same list
+     * *without* a filled control claiming otherwise.
+     *
+     * THE VALUE IS NORMALISED TO WHAT THE CORE EXPECTS, per type (`Api.php:1360-1426`), and a
+     * value that cannot be normalised is dropped rather than guessed. `-1` passes every relation
+     * type untouched: that is the core's own spelling for "this relation is not set".
+     *
+     * @param list<array{property: string, label: string, type: string, target: string|null, group: string|null}> $filterDefs
+     *
+     * @return array<string,string>
+     */
+    private static function selectedFilters(Request $request, array $filterDefs): array
+    {
+        /* `get()` throws on an array parameter in Symfony 5; `all()` is the documented way in. */
+        $requested = $request->query->all()['filter'] ?? null;
+
+        if (!is_array($requested)) {
+            return array();
+        }
+
+        $selected = array();
+
+        foreach ($filterDefs as $filter) {
+            $value = $requested[$filter['property']] ?? null;
+
+            if (!is_scalar($value) || (string) $value === '') {
+                continue;
+            }
+
+            $value = (string) $value;
+
+            switch ($filter['type']) {
+                case 'boolean':
+                    if ($value !== 'true' && $value !== 'false') {
+                        continue 2;
+                    }
+
+                    break;
+                case 'integer':
+                    if (!is_numeric($value)) {
+                        continue 2;
+                    }
+
+                    $value = (string) (int) $value;
+
+                    break;
+                default:
+                    /* A relation takes an id, and ids are opaque — only "not set" is special. */
+                    break;
+            }
+
+            $selected[$filter['property']] = $value;
+        }
+
+        return $selected;
+    }
+
+    /**
+     * The selected filters as `Api::getList()` takes them, or `null` when none are set.
+     *
+     * `null` AND NOT AN EMPTY ARRAY, because `getList()` guards its whole `where` block with
+     * `if($where && …)` (`Api.php:1335`) — an empty array would take the same branch as `null`
+     * today, but saying `null` keeps the call identical to the one this list made before filters
+     * existed, so an unfiltered list cannot change behaviour because of this feature.
+     *
+     * There is no conversion left to do here: `selectedFilters()` has already put every value
+     * into the form its type needs. This method exists to keep that statement in one place —
+     * the shape of the query belongs to the controller, not to the parameter reader.
+     *
+     * @param array<string,string>                                                                                $selected
+     * @param list<array{property: string, label: string, type: string, target: string|null, group: string|null}> $filterDefs
+     *
+     * @return array<string,string>|null
+     */
+    private static function where(array $selected, array $filterDefs): ?array
+    {
+        unset($filterDefs);
+
+        return $selected === array() ? null : $selected;
+    }
+
+    /**
+     * Everything the filter bar needs to render itself, or `null` when this entity offers none.
+     *
+     * THE FORM DELIBERATELY DOES NOT CARRY `page`. Sorting and language survive a filter change
+     * as hidden fields, because they describe how the list is shown; the page number describes
+     * *where* in a result set the reader is, and a changed filter is a different result set.
+     * Carrying it would land someone on page 7 of 3 — the core would quietly clamp that
+     * (`Api.php:1503-1505`) and the pager would then disagree with the URL. Leaving it out makes
+     * every filter change start at page one, which is also what ADR 0018 asks for.
+     *
+     * A RELATION THAT CANNOT OFFER OPTIONS IS DROPPED, not rendered empty. `RelationOptions`
+     * answers `null` for a target it cannot read — unknown to the schema, or not readable by this
+     * editor — and an empty dropdown would invite a filter that can only ever return nothing.
+     *
+     * @param list<array{property: string, label: string, type: string, target: string|null, group: string|null}> $filterDefs
+     * @param array<string,string>                                                                                $selected
+     * @param array<string,string|array<string,string>|null>                                                      $query
+     *
+     * @return array{action: string, hidden: array<string,string>, fields: list<array<string,mixed>>, active: bool, resetUrl: string|null, unsetValue: string}|null
+     */
+    private function filterForm(
+        array $filterDefs,
+        array $selected,
+        string $base,
+        array $query,
+        ?string $sort,
+        string $direction,
+        Request $request
+    ): ?array {
+        if ($filterDefs === array()) {
+            return null;
+        }
+
+        $relations = $this->app[RelationOptions::CONTAINER_KEY];
+        $fields    = array();
+
+        foreach ($filterDefs as $filter) {
+            $options   = null;
+            $truncated = false;
+
+            if (in_array($filter['type'], self::RELATION_TYPES, true)) {
+                $offered = $relations->forField(
+                    array('target' => $filter['target'], 'group' => $filter['group']),
+                    $request
+                );
+
+                if ($offered === null) {
+                    continue;
+                }
+
+                $options   = $offered['options'];
+                $truncated = $offered['total'] > count($offered['options']);
+            }
+
+            $fields[] = array(
+                'property'  => $filter['property'],
+                'label'     => $filter['label'],
+                'type'      => $filter['type'],
+                'value'     => $selected[$filter['property']] ?? '',
+                'options'   => $options,
+                'truncated' => $truncated,
+            );
+        }
+
+        if ($fields === array()) {
+            return null;
+        }
+
+        $hidden = array_filter(
+            array(
+                'lang' => $query['lang'] ?? null,
+                'sort' => $sort,
+                'dir'  => $sort === null ? null : strtolower($direction),
+            ),
+            static function ($value): bool {
+                return is_string($value) && $value !== '';
+            }
+        );
+
+        return array(
+            'action'     => $base,
+            'hidden'     => $hidden,
+            'fields'     => $fields,
+            'active'     => $selected !== array(),
+            'resetUrl'   => $selected === array() ? null : self::url($base, $hidden),
+            'unsetValue' => self::RELATION_UNSET,
+        );
+    }
+
+    /**
      * The columns with what the table head needs to render them as sort controls.
      *
      * A CLICK ON THE ACTIVE COLUMN TURNS THE DIRECTION AROUND, a click on any other sorts it
@@ -248,8 +458,8 @@ final class ListController
      * every parameter of the view survives every other one, which is what makes any state of
      * this list a link that can be sent to somebody.
      *
-     * @param list<array{property: string, label: string}> $columns
-     * @param array<string,string|null>                    $query
+     * @param list<array{property: string, label: string}>       $columns
+     * @param array<string,string|array<string,string>|null>      $query
      *
      * @return list<array{property: string, label: string, url: string, ariaSort: string}>
      */
@@ -282,11 +492,20 @@ final class ListController
      * `?sort=&dir=asc&page=1`, which matters because that bare address is what the menu links
      * to — two addresses for one page would split the browser history for no reason.
      *
-     * @param array<string,string|int|null> $params
+     * A nested `filter` array travels the same way: `http_build_query()` spells it
+     * `filter%5Baktiv%5D=true`, which is exactly what `selectedFilters()` reads back. An *empty*
+     * filter array is dropped like an empty string — otherwise the unfiltered list would get a
+     * second address that renders identically.
+     *
+     * @param array<string,string|int|array<string,string>|null> $params
      */
     private static function url(string $base, array $params): string
     {
         $params = array_filter($params, static function ($value): bool {
+            if (is_array($value)) {
+                return $value !== array();
+            }
+
             return $value !== null && $value !== '';
         });
 

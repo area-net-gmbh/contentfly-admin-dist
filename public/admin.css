@@ -696,3 +696,51 @@ li {
     color: var(--admin-muted);
     font-size: 0.875rem;
 }
+
+/*
+ * The list's filter bar (002-004-0002).
+ *
+ * IT WRAPS INSTEAD OF SCROLLING. The number of controls follows the entity — one on `Feldtyp`,
+ * potentially half a dozen elsewhere — so a fixed row would either cut the last control off or
+ * force a horizontal scrollbar onto the page that carries the table. Wrapping keeps every
+ * control reachable at any width without the layout knowing how many there are.
+ */
+
+.admin-list__filter {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 0.75rem 1rem;
+    margin: 0 0 1rem;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--admin-rule);
+    border-radius: 4px;
+}
+
+.admin-list__filter-field,
+.admin-list__filter-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin: 0;
+}
+
+.admin-list__filter-actions {
+    flex-direction: row;
+    align-items: center;
+    gap: 1rem;
+}
+
+.admin-list__filter-field > label {
+    color: var(--admin-muted);
+    font-size: 0.875rem;
+}
+
+.admin-list__filter-hint {
+    color: var(--admin-muted);
+    font-size: 0.75rem;
+}
+
+.admin-list__filter-reset {
+    font-size: 0.875rem;
+}

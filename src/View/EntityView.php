@@ -57,6 +57,41 @@ final class EntityView
         'groups',
     );
 
+    /**
+     * The field types a list filter is offered for — ADR 0018 §3.
+     *
+     * These are the types whose equality says something. `boolean`, `integer` and the three
+     * relation types are either a choice out of a known set or an exact number; `string`, `text`,
+     * `textarea` and `rte` are not, and `Api::getList()` has no per-field `LIKE` to offer them.
+     * They are covered by the full-text search instead.
+     *
+     * @var list<string>
+     */
+    public const FILTERABLE_TYPES = array(
+        'boolean',
+        'integer',
+        'join',
+        'multijoin',
+        'checkbox',
+    );
+
+    /**
+     * Property names that `Api::getList()` has already given a meaning inside `where`.
+     *
+     * `fulltext` IS THE SEARCH (`Api.php:1440`) and `mimetypes` filters the file table
+     * (`:1473`) — neither is read as a field name. A filterable column of either name would
+     * therefore not be compared for equality but silently do something else entirely, so no
+     * control is offered for it. Skipped rather than refused, in the line of the core's own
+     * handling of an unknown field: a column that cannot be filtered is a missing control, not
+     * an error page.
+     *
+     * @var list<string>
+     */
+    public const RESERVED_WHERE_KEYS = array(
+        'fulltext',
+        'mimetypes',
+    );
+
     private SchemaClient $schemaClient;
 
     private ColumnBuilder $columnBuilder;
@@ -83,6 +118,106 @@ final class EntityView
     public function listColumns(string $entity): array
     {
         return $this->columnBuilder->build($entity);
+    }
+
+    /**
+     * The filters the entity's list offers, in schema order.
+     *
+     * READS THE CORE KEY `isFilterable`, which ADR 0017 §3 deliberately left without a consumer
+     * — this is the consumer.
+     *
+     * IT DOES *NOT* START FROM THE COLUMNS, and that was the one correction this story had to
+     * make to its own ADR. ADR 0018 §4 first said filterable is only what is also a column,
+     * reasoning that the column list doubles as the fetch list in `ListController`. Both halves
+     * were wrong: `ColumnBuilder::LISTABLE_TYPES` admits no relation type at all, so the three
+     * relation types of §3 would never have been reachable — and the fetch list only decides
+     * which values are *printed*. `Api::getList()` applies `where` in SQL and checks nothing but
+     * whether the field is in the schema (`Api.php:1339`), so a filter over a field that is not
+     * fetched works exactly as well. The most useful filter of all — every position belonging to
+     * one record — sits on a relation, which a table cell cannot print in the first place.
+     *
+     * NOT EVERY FILTERABLE FIELD GETS A CONTROL (ADR 0018 §3). `Api::getList()` compares a
+     * `where` entry on a field with `=` and not with `LIKE` (`Api.php:1427-1432`), so a text box
+     * over a `string` would answer "nothing found" for `Mül` on a record called `Müller`. That
+     * looks like a broken filter, not like an exact comparison, so the text types are left to the
+     * full-text search and only the types whose equality is meaningful are offered here.
+     *
+     * THE REFUSALS OF THE LIST STILL HOLD. A `secret` field is not offered — the core would skip
+     * it inside `where` anyway (`Api.php:1356`), and a control that cannot ever filter is worse
+     * than none. `hide` keeps a field out of the admin entirely, so it cannot come back as a
+     * filter. The core's inherited bookkeeping is left out for the reason the list leaves it out:
+     * "who created this record" would otherwise turn up as a filter on every single entity.
+     *
+     * THE TYPE COMES FROM THE `WidgetResolver`, which is already the one place that answers what
+     * kind of field this is — asking the schema again here would be the second reader this class
+     * exists to prevent. Only `type`, `target` and `group` are taken from its answer; everything
+     * else it says is about an input element in a form, not about a filter.
+     *
+     * @param string $entity Entity name as the schema spells it, e.g. `Harness\Feldtyp`
+     *
+     * @return list<array{property: string, label: string, type: string, target: string|null, group: string|null}>
+     */
+    public function listFilters(string $entity): array
+    {
+        $properties = $this->schemaClient->getSchema()[$entity]['properties'] ?? array();
+        $filters    = array();
+
+        foreach ($properties as $property => $meta) {
+            $property = (string) $property;
+
+            if (!self::isFilterable($property, $meta)) {
+                continue;
+            }
+
+            $widget = $this->widgetResolver->resolve($entity, $property, $meta);
+            $type   = $widget['type'] ?? null;
+
+            if (!is_string($type) || !in_array($type, self::FILTERABLE_TYPES, true)) {
+                continue;
+            }
+
+            $target = $widget['target'] ?? null;
+            $group  = $widget['group'] ?? null;
+
+            $filters[] = array(
+                'property' => $property,
+                'label'    => Shaping::label($meta) ?? ColumnBuilder::humanise($property),
+                'type'     => $type,
+                'target'   => is_string($target) ? $target : null,
+                'group'    => is_string($group) ? $group : null,
+            );
+        }
+
+        return $filters;
+    }
+
+    /**
+     * Whether one field may be offered as a filter at all — the gates before the type is asked.
+     *
+     * The order is the order of the reasons: the id is the record's address and already its own
+     * route, a field without the core's `isFilterable` was never meant to be filtered, a secret
+     * cannot be filtered by anyone, `hide` is a refusal that holds everywhere, and the last two
+     * lists are the bookkeeping the admin does not put in front of an editor.
+     *
+     * @param array<string,mixed>|mixed $meta The field's schema entry
+     */
+    private static function isFilterable(string $property, $meta): bool
+    {
+        if ($property === ColumnBuilder::ID_PROPERTY || !is_array($meta)) {
+            return false;
+        }
+
+        if (($meta['isFilterable'] ?? false) !== true || ($meta['secret'] ?? false) === true) {
+            return false;
+        }
+
+        if (Shaping::flag($meta, 'hide') === true) {
+            return false;
+        }
+
+        return !in_array($property, self::RESERVED_WHERE_KEYS, true)
+            && !in_array($property, self::INHERITED_RELATIONS, true)
+            && !in_array($property, ColumnBuilder::TECHNICAL_PROPERTIES, true);
     }
 
     /**

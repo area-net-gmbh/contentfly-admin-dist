@@ -24,6 +24,17 @@
     worth — wrapping a value in a link or adding a seventh cell of that class would make the
     gate read the wrong column. The action column is therefore `admin-list__action`, and its
     head cell carries no `aria-sort`, which the same gate uses to find the sorted column.
+
+    THE FILTER BAR SITS OUTSIDE THE EMPTY CHECK (002-004-0002), and that is not a layout
+    preference. Inside it, a filter that matches nothing would take its own controls off the page
+    along with the table, and there would be no way left to undo it except editing the URL. For
+    the same reason the empty state says *which* kind of empty it is: no records at all, or none
+    that match the filter.
+
+    IT IS A PLAIN GET FORM. The filter travels in the query string like the sort order does, so
+    Turbo navigates the submit by itself and a filtered list stays a sendable address (ADR 0018
+    §2). `page` is deliberately not among the hidden fields — `ListController::filterForm()`
+    explains why.
 #}{% extends 'layout.html.twig' %}
 
 {% block bodyAttributes %} class="admin"{% endblock %}
@@ -34,8 +45,51 @@
 
     <p class="admin-list__new"><a href="{{ newUrl }}">Neuer Datensatz</a></p>
 
+{% if filterForm %}
+    <form class="admin-list__filter" method="get" action="{{ filterForm.action }}">
+{% for name, value in filterForm.hidden %}
+        <input type="hidden" name="{{ name }}" value="{{ value }}">
+{% endfor %}
+{% for field in filterForm.fields %}
+        <p class="admin-list__filter-field">
+            <label for="filter-{{ field.property }}">{{ field.label }}</label>
+{% if field.type == 'integer' %}
+            <input type="number" id="filter-{{ field.property }}" name="filter[{{ field.property }}]" value="{{ field.value }}" step="1">
+{% elseif field.type == 'boolean' %}
+            <select id="filter-{{ field.property }}" name="filter[{{ field.property }}]">
+                <option value="">Alle</option>
+                <option value="true"{{ field.value == 'true' ? ' selected' : '' }}>Ja</option>
+                <option value="false"{{ field.value == 'false' ? ' selected' : '' }}>Nein</option>
+            </select>
+{% else %}
+            <select id="filter-{{ field.property }}" name="filter[{{ field.property }}]">
+                <option value="">Alle</option>
+                <option value="{{ filterForm.unsetValue }}"{{ field.value == filterForm.unsetValue ? ' selected' : '' }}>Nicht gesetzt</option>
+{% for option in field.options %}
+                <option value="{{ option.value }}"{{ field.value == option.value ? ' selected' : '' }}>{{ option.label }}</option>
+{% endfor %}
+            </select>
+{% if field.truncated %}
+            <span class="admin-list__filter-hint">Nur die ersten {{ field.options|length }} Einträge zur Auswahl</span>
+{% endif %}
+{% endif %}
+        </p>
+{% endfor %}
+        <p class="admin-list__filter-actions">
+            <button type="submit">Filtern</button>
+{% if filterForm.resetUrl %}
+            <a class="admin-list__filter-reset" href="{{ filterForm.resetUrl }}">Filter aufheben</a>
+{% endif %}
+        </p>
+    </form>
+{% endif %}
+
 {% if rows is empty %}
+{% if filterForm and filterForm.active %}
+    <p class="admin__hint">Kein Datensatz passt zu diesem Filter.</p>
+{% else %}
     <p class="admin__hint">Für diese Entität gibt es noch keine Datensätze.</p>
+{% endif %}
 {% else %}
     <table class="admin-list">
         <thead>
