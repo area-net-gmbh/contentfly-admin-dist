@@ -6,6 +6,7 @@ namespace Areanet\ContentflyAdmin\Controller;
 
 use Areanet\ContentflyAdmin\AdminManager;
 use Areanet\ContentflyAdmin\Asset\Importmap;
+use Areanet\ContentflyAdmin\Auth\FormToken;
 use Areanet\ContentflyAdmin\Schema\SchemaClient;
 use Areanet\ContentflyAdmin\View\ColumnBuilder;
 use Areanet\ContentflyAdmin\View\EntityView;
@@ -180,6 +181,15 @@ final class ListController
         $order = $query + array('sort' => $sort, 'dir' => $sort === null ? null : strtolower($direction));
 
         $queryForm = $this->queryForm($filterDefs, $selected, $term, $searchable, $base, $query, $sort, $direction, $request);
+        $rows      = self::rows($records, $columns, $formBase);
+
+        /*
+         * THE SELECTION IS OFFERED ONLY WHERE THERE IS SOMETHING TO SELECT. An empty table needs
+         * no checkboxes, and a record without a usable id cannot be named in `ids[]` — the same
+         * record whose row offers no edit link.
+         */
+        $token     = FormToken::issue($request);
+        $selection = self::selection($rows, $manager->getPrefix(), $name, $base, $order, $page, $token);
 
         /*
          * THE SEARCH BOX IS THE ONLY REASON THIS PAGE NEEDS A MODULE, so it is asked for only
@@ -187,9 +197,15 @@ final class ListController
          * `FormController::controllers()`. Without the module the box stays a plain text field in
          * a plain form and searching costs one press of the return key.
          */
-        $controllers = $queryForm !== null && $queryForm['search'] !== null
-            ? array('admin-list-search' => 'admin/list-search')
-            : array();
+        $controllers = array();
+
+        if ($queryForm !== null && $queryForm['search'] !== null) {
+            $controllers['admin-list-search'] = 'admin/list-search';
+        }
+
+        if ($selection !== null) {
+            $controllers['admin-list-select'] = 'admin/list-select';
+        }
 
         $html = $this->app[TemplateRenderer::CONTAINER_KEY]->render('list.html.twig', array(
             'title'      => $name.' — '.$manager->getTitle(),
@@ -199,7 +215,8 @@ final class ListController
             'logoutUrl'  => $manager->getPrefix().'/logout',
             'entity'     => $name,
             'columns'    => self::sortableColumns($columns, $base, $query, $sort, $direction, $page),
-            'rows'       => self::rows($records, $columns, $formBase),
+            'rows'       => $rows,
+            'selection'  => $selection,
             'newUrl'     => $formBase,
             'queryForm'   => $queryForm,
             'controllers' => $controllers,
@@ -212,7 +229,18 @@ final class ListController
             ),
         ));
 
-        return new Response($html, 200, array('Content-Type' => 'text/html; charset=UTF-8'));
+        $response = new Response($html, 200, array('Content-Type' => 'text/html; charset=UTF-8'));
+
+        /*
+         * The token's cookie is set once per session, exactly as the form view sets it
+         * (`FormController::render()`): the form here posts to the bulk actions, and without the
+         * cookie `FormToken::verify()` would have nothing to compare the field against.
+         */
+        if ($selection !== null && !FormToken::isIssued($request, $token)) {
+            $response->headers->setCookie(FormToken::cookie($request, $token, $manager->getPrefix()));
+        }
+
+        return $response;
     }
 
     /**
@@ -582,7 +610,7 @@ final class ListController
      * @param list<object>                                 $records
      * @param list<array{property: string, label: string}> $columns
      *
-     * @return list<array{cells: array<string,string>, editUrl: string|null}>
+     * @return list<array{cells: array<string,string>, id: string|null, editUrl: string|null}>
      */
     private static function rows(array $records, array $columns, string $formBase): array
     {
@@ -597,15 +625,61 @@ final class ListController
 
             $id = $record->{ColumnBuilder::ID_PROPERTY} ?? null;
 
+            $usable = is_scalar($id) && (string) $id !== '' ? (string) $id : null;
+
             $rows[] = array(
                 'cells'   => $cells,
-                'editUrl' => is_scalar($id) && (string) $id !== ''
-                    ? $formBase.'/'.rawurlencode((string) $id)
-                    : null,
+                'id'      => $usable,
+                'editUrl' => $usable === null ? null : $formBase.'/'.rawurlencode($usable),
             );
         }
 
         return $rows;
+    }
+
+    /**
+     * What the selection form needs, or `null` when this page has nothing to select.
+     *
+     * THE FORM IS A SECOND FORM, NOT A WRAPPER AROUND THE FIRST. The query bar is a GET form and
+     * this one is a POST, and an HTML form cannot contain another — so the bar sits above the
+     * table and this one around it. That split is also why the selection survives nothing: it
+     * belongs to the page the reader is looking at, which is what ADR 0018 §7 asks for.
+     *
+     * THE RETURN ADDRESS TRAVELS AS A QUERY STRING, NEVER AS A URL. The bulk actions have to come
+     * back to the list the reader started from, filter and page included, and the obvious way —
+     * a hidden field with the full address — is an open redirect: whatever a crafted form put in
+     * there is where the editor's browser would go. Only the parameters are passed, and the path
+     * is rebuilt from the entity on the other side, so nothing a client sends can leave this
+     * admin.
+     *
+     * @param list<array{cells: array<string,string>, id: string|null, editUrl: string|null}> $rows
+     * @param array<string,string|array<string,string>|null>                                  $order
+     *
+     * @return array{action: string, tokenField: string, token: string, query: string}|null
+     */
+    private static function selection(
+        array $rows,
+        string $prefix,
+        string $name,
+        string $base,
+        array $order,
+        int $page,
+        string $token
+    ): ?array {
+        foreach ($rows as $row) {
+            if ($row['id'] !== null) {
+                $here = self::url($base, $order + array('page' => $page));
+
+                return array(
+                    'action'     => $prefix.'/bulk/'.MenuBuilder::entityToUrl($name),
+                    'tokenField' => FormToken::FIELD,
+                    'token'      => $token,
+                    'query'      => (string) parse_url($here, PHP_URL_QUERY),
+                );
+            }
+        }
+
+        return null;
     }
 
     /**

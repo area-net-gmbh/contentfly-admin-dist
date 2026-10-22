@@ -41,6 +41,19 @@
     box is `data-turbo-permanent` and the form `data-turbo-action="replace"`: the box survives the
     visit it triggers, with focus and caret, and typing does not fill the browser history. Both
     belong to `admin/list-search`, which is declared only on a page that actually has a box.
+
+    THE SELECTION COLUMN HAS CLASSES OF ITS OWN (002-004-0004), for the reason the action cell
+    does, and one more: `tools/harness-liste-pruefen.php` counts the rows by occurrences of
+    `admin-list__row` and chunks the values by the number of sortable heads. A cell called
+    `admin-list__cell` or a head called `admin-list__head` would therefore move every value one
+    column over. The selection is `admin-list__select` and `admin-list__select-head`, and the
+    head cell carries no `<a>`, which is what the head regex looks for.
+
+    THE SELECTION IS A SECOND FORM AROUND THE TABLE. It is a POST and the query bar is a GET, and
+    one form cannot contain another. The select-all box has no `name`, so it is never submitted —
+    without JavaScript it simply does nothing, while the row boxes keep working and the bar stays
+    visible with its initial text. `admin/list-select` hides the bar while nothing is ticked and
+    counts what is.
 #}{% extends 'layout.html.twig' %}
 
 {% block bodyAttributes %} class="admin"{% endblock %}
@@ -106,9 +119,21 @@
     <p class="admin__hint">Für diese Entität gibt es noch keine Datensätze.</p>
 {% endif %}
 {% else %}
+{% if selection %}
+    <form class="admin-list__bulk" method="post" action="{{ selection.action }}"
+          data-controller="admin-list-select">
+        <input type="hidden" name="{{ selection.tokenField }}" value="{{ selection.token }}">
+        <input type="hidden" name="query" value="{{ selection.query }}">
+{% endif %}
     <table class="admin-list">
         <thead>
             <tr>
+{% if selection %}
+                <th scope="col" class="admin-list__select-head">
+                    <input type="checkbox" aria-label="Alle Zeilen dieser Seite markieren"
+                           data-admin-list-select-target="all">
+                </th>
+{% endif %}
 {% for column in columns %}
                 <th scope="col" class="admin-list__head" aria-sort="{{ column.ariaSort }}">
                     <a class="admin-list__sort admin-list__sort--{{ column.ariaSort }}" href="{{ column.url }}">{{ column.label }}</a>
@@ -120,6 +145,15 @@
         <tbody>
 {% for row in rows %}
             <tr class="admin-list__row">
+{% if selection %}
+                <td class="admin-list__select">
+{% if row.id %}
+                    <input type="checkbox" name="ids[]" value="{{ row.id }}"
+                           aria-label="Datensatz {{ row.id }} markieren"
+                           data-admin-list-select-target="row">
+{% endif %}
+                </td>
+{% endif %}
 {% for column in columns %}
                 <td class="admin-list__cell">{{ row.cells[column.property] }}</td>
 {% endfor %}
@@ -132,6 +166,13 @@
 {% endfor %}
         </tbody>
     </table>
+{% if selection %}
+        <p class="admin-list__bulk-bar" data-admin-list-select-target="bar">
+            <span class="admin-list__bulk-count" aria-live="polite"
+                  data-admin-list-select-target="count">Keine Zeile markiert</span>
+        </p>
+    </form>
+{% endif %}
 
     <nav class="admin-pager" aria-label="Seitennavigation">
 {% if pagination.prevUrl %}

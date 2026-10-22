@@ -45,6 +45,7 @@ final class Importmap
         'admin/rte'          => 'controllers/rte_controller.js',
         'admin/search'       => 'controllers/search_controller.js',
         'admin/list-search'  => 'controllers/list_search_controller.js',
+        'admin/list-select'  => 'controllers/list_select_controller.js',
     );
 
     /**

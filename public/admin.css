@@ -758,3 +758,35 @@ li {
     min-width: 12rem;
     max-width: 22rem;
 }
+
+/*
+ * The selection column and its action bar (002-004-0004).
+ *
+ * ITS OWN CLASSES, NOT THE TABLE'S. `admin-list__cell` is what the list gate reads the values
+ * out of and `admin-list__head` what it finds the sorted column by — a selection cell under
+ * either name would shift every value one column over. The classes here are therefore separate
+ * on purpose, and the rules repeat the few borders instead of reusing those selectors.
+ */
+
+.admin-list__select-head,
+.admin-list__select {
+    width: 1%;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--admin-rule);
+    text-align: center;
+}
+
+.admin-list__bulk-bar {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin: 0.75rem 0 0;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--admin-rule);
+    border-radius: 4px;
+}
+
+.admin-list__bulk-count {
+    color: var(--admin-muted);
+    font-size: 0.875rem;
+}
