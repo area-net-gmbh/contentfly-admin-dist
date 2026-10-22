@@ -215,13 +215,57 @@ final class FormController
          * it may be written at all. The method check sits above this so a HEAD or PUT does not
          * pay for the queries.
          */
+        /*
+         * THE WRITE RIGHT IS ONE ANSWER OUT OF TWO QUESTIONS (ADR 0019). The entity has to be
+         * writable at all, and where it is translatable the language has to be writable too —
+         * a group limited to `{"en": "readable"}` may change German and not English.
+         */
+        $mayWrite = $this->mayWrite($name) && $this->mayEditLanguage($name, $language);
+
+        if (!$mayWrite) {
+            /*
+             * A POST WITHOUT THE RIGHT IS REFUSED, NOT SILENTLY DROPPED. The submit button is
+             * not rendered below, so the usual way here is a form that was open while the right
+             * was withdrawn — and that editor needs to be told their input did not land.
+             */
+            if ($request->isMethod('POST')) {
+                return $this->writeDeniedPage($name, $language);
+            }
+
+            $fields = self::withoutWriteAccess($fields);
+        }
+
         $prepared = $this->prepare($request, $name, $fields);
 
         if ($request->isMethod('POST')) {
             return $this->save($request, $name, $id, $language, $fields, $prepared);
         }
 
-        return $this->show($request, $name, $id, $language, $fields, $prepared);
+        return $this->show($request, $name, $id, $language, $fields, $prepared, $mayWrite);
+    }
+
+    /**
+     * Every field write-protected, on top of whatever already protected it.
+     *
+     * IT ONLY EVER ADDS, exactly as the `readonly` attribute does in `EntityView::formFields()`.
+     * Overwriting the flag instead of setting it would let a missing permission *lift* the
+     * protection that a `virtualjoin`, an unknown type or an `#[Admin(readonly: true)]` put
+     * there — a right that is absent must never widen what a field allows (ADR 0015).
+     *
+     * `fragment()` reads this flag, so the field renders through `widget/readonly.html.twig` and
+     * is not submitted at all. That is the masking ADR 0010 asks for instead of a bare rejection.
+     *
+     * @param list<array<string,mixed>> $fields
+     *
+     * @return list<array<string,mixed>>
+     */
+    private static function withoutWriteAccess(array $fields): array
+    {
+        foreach ($fields as $index => $field) {
+            $fields[$index]['widget']['readonly'] = true;
+        }
+
+        return $fields;
     }
 
     /**
@@ -235,7 +279,8 @@ final class FormController
         ?string $id,
         ?string $language,
         array $fields,
-        array $prepared
+        array $prepared,
+        bool $mayWrite
     ): Response {
         $record = null;
 
@@ -255,7 +300,9 @@ final class FormController
             $prepared,
             self::recordValues($fields, $record),
             200,
-            null
+            null,
+            array(),
+            $mayWrite
         );
     }
 
@@ -434,7 +481,13 @@ final class FormController
             $values,
             422,
             $property === null ? $message : null,
-            $property === null ? array() : array($property => $message)
+            $property === null ? array() : array($property => $message),
+            /*
+             * Reached only through `save()`, and `formAction()` refuses a write without the
+             * right before it gets there — so the form that reports a validation error is by
+             * definition one the editor may write.
+             */
+            true
         );
     }
 
@@ -454,7 +507,8 @@ final class FormController
         array $values,
         int $status,
         ?string $error,
-        array $fieldErrors = array()
+        array $fieldErrors,
+        bool $mayWrite
     ): Response {
         $manager = $this->app[AdminManager::CONTAINER_KEY];
         $tabs    = self::tabs($fields, $prepared, $values, $fieldErrors);
@@ -474,6 +528,7 @@ final class FormController
             'tokenField' => FormToken::FIELD,
             'token'      => $token,
             'error'      => $error,
+            'mayWrite'   => $mayWrite,
             'tabs'       => $tabs,
             /*
              * The editor is told that one finding is all the core reports (gap L20), so the

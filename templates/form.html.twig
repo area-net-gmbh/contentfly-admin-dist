@@ -75,6 +75,9 @@
 {% if partial %}
     <p class="admin-form__hint">Das Grundsystem meldet immer nur einen Punkt auf einmal — nach dem Beheben kann beim nächsten Speichern ein weiterer dazukommen.</p>
 {% endif %}
+{% if not mayWrite %}
+    <p class="admin-form__hint" role="status">Du darfst diesen Datensatz ansehen, aber nicht ändern — die Felder stehen nur zum Lesen.</p>
+{% endif %}
 
 {% if tabs is empty %}
     <p class="admin__hint">Diese Entität hat keine bearbeitbaren Felder.</p>
@@ -102,9 +105,11 @@
 {% endfor %}
 {% endif %}
 
+{% if mayWrite %}
         <div class="admin-form__actions">
             <button class="admin-form__submit" type="submit">{% if isNew %}Anlegen{% else %}Speichern{% endif %}</button>
         </div>
+{% endif %}
     </form>
 {% endif %}
 </main>

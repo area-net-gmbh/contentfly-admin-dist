@@ -59,6 +59,35 @@ trait GuardsPermissions
     }
 
     /**
+     * May the editor change this entity's records in this language?
+     *
+     * `null` is the language of an entity that is not translatable, and the answer is then the
+     * entity-level one — the whole language layer only applies where `settings.i18n` is set.
+     */
+    private function mayEditLanguage(string $entity, ?string $language): bool
+    {
+        return $this->app[PermissionView::CONTAINER_KEY]->mayEditLanguage($entity, $language);
+    }
+
+    /**
+     * The refusal a write gets when the editor may read but not change.
+     *
+     * IT IS A SEPARATE MESSAGE FROM `accessDeniedPage()` because the situations differ for the
+     * editor. There, the page was never theirs; here they were just looking at it. The usual way
+     * to arrive is a form that was open while the right was withdrawn, or one whose submit
+     * button was never rendered — so the sentence says plainly that nothing was saved.
+     */
+    private function writeDeniedPage(string $entity, ?string $language): Response
+    {
+        $where = $language === null ? '' : ' in der Sprache "'.$language.'"';
+
+        return $this->refusalPage(
+            'Nicht gespeichert',
+            'Für "'.$entity.'"'.$where.' fehlt dir das Schreibrecht — es wurde nichts gespeichert.'
+        );
+    }
+
+    /**
      * The refusal a page route gives: the admin's own layout, a plain sentence, status 403.
      *
      * IT KEEPS THE MENU. The editor has somewhere to go from here, and the menu now lists only
@@ -71,18 +100,30 @@ trait GuardsPermissions
      */
     private function accessDeniedPage(string $entity): Response
     {
+        return $this->refusalPage(
+            'Kein Zugriff',
+            'Für "'.$entity.'" fehlt dir die Berechtigung. '
+            .'Wende dich an eine Administratorin oder einen Administrator, '
+            .'wenn du damit arbeiten musst.'
+        );
+    }
+
+    /**
+     * The one place a refusal becomes a page, so the two messages above cannot drift into two
+     * different-looking pages.
+     */
+    private function refusalPage(string $heading, string $message): Response
+    {
         $manager = $this->app[AdminManager::CONTAINER_KEY];
 
         $html = $this->app[TemplateRenderer::CONTAINER_KEY]->render('refused.html.twig', array(
-            'title'      => 'Kein Zugriff — '.$manager->getTitle(),
+            'title'      => $heading.' — '.$manager->getTitle(),
             'stylesheet' => $manager->assetUrl('admin.css'),
             'importmap'  => Importmap::scriptTag($manager),
             'menu'       => $this->app[MenuBuilder::CONTAINER_KEY]->build(),
             'logoutUrl'  => $manager->getPrefix().'/logout',
-            'heading'    => 'Kein Zugriff',
-            'message'    => 'Für "'.$entity.'" fehlt dir die Berechtigung. '
-                .'Wende dich an eine Administratorin oder einen Administrator, '
-                .'wenn du damit arbeiten musst.',
+            'heading'    => $heading,
+            'message'    => $message,
         ));
 
         return new Response($html, 403, array('Content-Type' => 'text/html; charset=UTF-8'));
