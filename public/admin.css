@@ -844,3 +844,159 @@ li {
     margin: 0.5rem 0 0;
     color: var(--admin-muted);
 }
+
+/*
+ * THE FILE MANAGER (story 003-001).
+ *
+ * TWO COLUMNS THAT COLLAPSE INTO ONE, and the tree is the one that gives way: on a narrow screen
+ * the files are what the editor came for. `grid-template-columns` with a fixed first track rather
+ * than a percentage, because a folder name does not get longer when the window does.
+ *
+ * THE TREE COLUMN MAY BE ABSENT. An editor who may read files but not folders gets no tree at all
+ * (ADR 0019), so the layout must not reserve space for it — `grid-template-columns` is therefore
+ * set on the container that has it and the single-column case is the default.
+ */
+.admin-files__layout {
+    display: grid;
+    gap: 1.5rem;
+    align-items: start;
+}
+
+@media (min-width: 48rem) {
+    .admin-files__layout:has(.admin-files__tree) {
+        grid-template-columns: 14rem 1fr;
+    }
+}
+
+/*
+ * THE TRAIL IS THE WAY BACK UP. It is derived from the tree rather than from history, so it works
+ * for someone who arrived from a bookmark — which is also why the root link is always present and
+ * never the current page's own address.
+ */
+.admin-files__trail {
+    margin: 0.5rem 0 1.5rem;
+    font-size: 0.9375rem;
+}
+
+.admin-files__trail-link {
+    color: var(--admin-accent);
+}
+
+.admin-files__trail-link--current {
+    color: var(--admin-text);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.admin-files__trail-separator {
+    margin: 0 0.375rem;
+    color: var(--admin-muted);
+}
+
+.admin-files__tree-heading {
+    margin: 0 0 0.5rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--admin-muted);
+}
+
+/* One indent per level, applied by nesting — the depth is in the markup, not in a class. */
+.admin-files__tree-list {
+    margin: 0;
+    padding: 0 0 0 0.875rem;
+    list-style: none;
+}
+
+.admin-files__tree > .admin-files__tree-list {
+    padding-left: 0;
+}
+
+.admin-files__tree-item {
+    border: 0;
+}
+
+.admin-files__tree-link {
+    display: block;
+    padding: 0.25rem 0.375rem;
+    border-radius: 3px;
+    color: inherit;
+    text-decoration: none;
+}
+
+.admin-files__tree-link:hover {
+    background: var(--admin-rule);
+}
+
+.admin-files__tree-link--current {
+    background: var(--admin-accent);
+    color: var(--admin-accent-contrast);
+    font-weight: 600;
+}
+
+.admin-files__table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9375rem;
+}
+
+.admin-files__row:hover {
+    background: var(--admin-rule);
+}
+
+.admin-files__cell {
+    max-width: 24rem;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--admin-rule);
+    overflow: hidden;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.admin-files__cell--size {
+    text-align: right;
+    white-space: nowrap;
+}
+
+/*
+ * THE PREVIEW CELL HAS ITS SIZE BEFORE IT HAS CONTENT (story 003-001-0003).
+ *
+ * The thumbnails arrive in 003-001-0004. Fixing the box here means the rows do not change height
+ * when they do, and a slow or missing derivative does not make the table jump while it loads.
+ */
+.admin-files__cell--preview {
+    width: 4rem;
+    max-width: 4rem;
+    padding-right: 0;
+}
+
+.admin-files__preview {
+    display: block;
+    width: 3rem;
+    height: 3rem;
+    border-radius: 3px;
+    object-fit: cover;
+}
+
+.admin-files__preview--placeholder {
+    background: var(--admin-rule);
+}
+
+.admin-files__empty {
+    margin: 0;
+    color: var(--admin-muted);
+}
+
+.admin-files__pagination {
+    display: flex;
+    gap: 0.75rem;
+    align-items: baseline;
+    margin: 0.75rem 0 0;
+    font-size: 0.9375rem;
+}
+
+.admin-files__page-state {
+    color: var(--admin-muted);
+}

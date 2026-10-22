@@ -1,16 +1,118 @@
 {#
-    The file manager (ADR 0020).
+    The file manager: folders on the left, the open folder's files on the right (ADR 0020).
 
-    EMPTY ON PURPOSE AS OF STORY 003-001-0002. This task mounts the route and closes it off;
-    the folder tree and the file list arrive in 003-001-0003, the preview in 003-001-0004 and
-    the write paths in 003-001-0005. The template exists already so the route has something to
-    render that is a page of the admin rather than a bare status code.
+    THE FOLDER IS IN THE ADDRESS, so every view of this page is a sendable link and the browser's
+    back button works without this page remembering anything. A placeholder could not carry a
+    folder tree of arbitrary depth (ADR 0007), which is why it is a query parameter and not a
+    path segment — the list carries its own state the same way (ADR 0018).
+
+    TURBO NEEDS NOTHING HERE. Importing it in the layout starts it, so every link below is already
+    a Turbo visit: the body is swapped, the page is not rebuilt. That is the whole wiring, and it
+    is why this template has no `controllers` map — there is no Stimulus controller on this page.
+
+    NO ADDRESS IS BUILT IN THIS FILE. `FileController` hands every URL over ready-made, the rule
+    the list view follows: a template that concatenates URLs is a second place that has to know
+    the prefix and the parameter name.
+
+    THE TREE IS OPTIONAL. `tree` is `null` for an editor who may read files but not folders — the
+    column is then left out and the file list stays (ADR 0019, additive masking). It is not an
+    error state and must not look like one.
+
+    THE PREVIEW COLUMN IS A PLACEHOLDER AS OF 003-001-0003. Thumbnails arrive in 003-001-0004,
+    which is also where it is decided what a file that is not an image shows instead. The column
+    exists already so the row height does not change when they do.
 #}{% extends 'layout.html.twig' %}
 
 {% block bodyAttributes %} class="admin"{% endblock %}
 
+{% macro folderList(items) %}
+{% import _self as macros %}
+    <ul class="admin-files__tree-list">
+{% for item in items %}
+        <li class="admin-files__tree-item">
+            <a class="admin-files__tree-link{{ item.current ? ' admin-files__tree-link--current' : '' }}"
+               href="{{ item.url }}"{{ item.current ? ' aria-current="true"' : '' }}>{{ item.title }}</a>
+{% if item.childs is not empty %}
+{{ macros.folderList(item.childs) }}
+{% endif %}
+        </li>
+{% endfor %}
+    </ul>
+{% endmacro %}
+
 {% block content %}
+{% import _self as macros %}
 <main class="admin__main admin-files">
     <h1>Dateien</h1>
+
+    <nav class="admin-files__trail" aria-label="Ordnerpfad">
+        <a class="admin-files__trail-link{{ isRoot ? ' admin-files__trail-link--current' : '' }}"
+           href="{{ rootUrl }}"{{ isRoot ? ' aria-current="true"' : '' }}>Alle Dateien</a>
+{% for step in trail %}
+        <span class="admin-files__trail-separator" aria-hidden="true">/</span>
+        <a class="admin-files__trail-link{{ step.current ? ' admin-files__trail-link--current' : '' }}"
+           href="{{ step.url }}"{{ step.current ? ' aria-current="true"' : '' }}>{{ step.title }}</a>
+{% endfor %}
+    </nav>
+
+    <div class="admin-files__layout">
+{% if tree is not null %}
+        <nav class="admin-files__tree" aria-label="Ordner">
+            <h2 class="admin-files__tree-heading">Ordner</h2>
+{% if tree is empty %}
+            <p class="admin-files__empty">Es gibt noch keine Ordner.</p>
+{% else %}
+{{ macros.folderList(tree) }}
+{% endif %}
+        </nav>
+{% endif %}
+
+        <section class="admin-files__list" aria-label="Dateien">
+{% if files is empty %}
+            <p class="admin-files__empty">
+{% if isRoot %}
+                Ausserhalb der Ordner liegt keine Datei.
+{% else %}
+                Dieser Ordner enthält keine Datei.
+{% endif %}
+            </p>
+{% else %}
+            <table class="admin-files__table">
+                <thead>
+                    <tr>
+                        <th scope="col" class="admin-files__cell admin-files__cell--preview">Vorschau</th>
+                        <th scope="col" class="admin-files__cell">Name</th>
+                        <th scope="col" class="admin-files__cell">Typ</th>
+                        <th scope="col" class="admin-files__cell admin-files__cell--size">Größe</th>
+                    </tr>
+                </thead>
+                <tbody>
+{% for file in files %}
+                    <tr class="admin-files__row">
+                        <td class="admin-files__cell admin-files__cell--preview">
+                            <span class="admin-files__preview admin-files__preview--placeholder" aria-hidden="true"></span>
+                        </td>
+                        <td class="admin-files__cell">{{ file.name }}</td>
+                        <td class="admin-files__cell">{{ file.type }}</td>
+                        <td class="admin-files__cell admin-files__cell--size">{{ file.size }}</td>
+                    </tr>
+{% endfor %}
+                </tbody>
+            </table>
+
+{% if pagination.pages > 1 %}
+            <nav class="admin-files__pagination" aria-label="Blättern">
+{% if pagination.prevUrl %}
+                <a class="admin-files__page-link" rel="prev" href="{{ pagination.prevUrl }}">Zurück</a>
+{% endif %}
+                <span class="admin-files__page-state">Seite {{ pagination.page }} von {{ pagination.pages }} ({{ pagination.total }} Dateien)</span>
+{% if pagination.nextUrl %}
+                <a class="admin-files__page-link" rel="next" href="{{ pagination.nextUrl }}">Weiter</a>
+{% endif %}
+            </nav>
+{% endif %}
+{% endif %}
+        </section>
+    </div>
 </main>
 {% endblock %}

@@ -8,6 +8,7 @@ use Areanet\ContentflyAdmin\AdminManager;
 use Areanet\ContentflyAdmin\Asset\Importmap;
 use Areanet\ContentflyAdmin\View\MenuBuilder;
 use Areanet\ContentflyAdmin\View\TemplateRenderer;
+use Areanet\PIM\Classes\Api;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -54,6 +55,29 @@ final class FileController
     /** The tree entity that gives the files their folders. */
     public const ENTITY_FOLDER = 'PIM\\Folder';
 
+    /**
+     * The query parameter that carries the open folder.
+     *
+     * A PARAMETER AND NOT A PATH SEGMENT (ADR 0020). A placeholder matches one segment
+     * (ADR 0007), so no route could address a folder tree of arbitrary depth.
+     */
+    public const PARAM_FOLDER = 'folder';
+
+    /**
+     * The `where` value that asks `Api::getList()` for the records whose relation is unset.
+     *
+     * THE ROOT IS "NO FOLDER", not "all files". `ListController` uses the same literal for the
+     * same core convention — verified against the running harness: `folder => '-1'` returns the
+     * one file that sits outside every folder, while an unknown id returns none.
+     */
+    private const FOLDER_UNSET = '-1';
+
+    /** How many files one page of the listing shows. */
+    public const ITEMS_PER_PAGE = 50;
+
+    /** What a cell shows when the value is null or empty — never an empty-looking table. */
+    private const EMPTY_CELL = '—';
+
     /** @var \Areanet\PIM\Classes\Kernel\ApplicationInterface */
     private $app;
 
@@ -91,14 +115,266 @@ final class FileController
             return $this->accessDeniedPage(self::ENTITY_FILE);
         }
 
+        $api = new Api($this->app, $request);
+
+        /*
+         * THE TREE IS ASKED FOR ONLY WHEN IT MAY BE READ, and that is not a nicety —
+         * `Api::getTree2()` raises a `ContentflyException` for a folder entity the editor may not
+         * read (`Api.php:2430`). Asking first and leaving the column out is the additive masking
+         * ADR 0019 settled on for the form: a missing right takes something away, it never turns
+         * the whole page into a refusal. The files themselves are a different entity and stay
+         * listed.
+         */
+        $mayReadFolders = $this->mayRead(self::ENTITY_FOLDER);
+        $tree           = $mayReadFolders ? $api->getTree2(self::ENTITY_FOLDER) : null;
+
+        $folder = self::requestedFolder($request, $tree, $mayReadFolders);
+        $page   = self::page($request);
+
+        /*
+         * `getList()` ANSWERS `null` FOR AN EMPTY RESULT, not an empty list, and
+         * `ListController` normalises the same special case away at the same edge.
+         */
+        $result = $api->getList(
+            self::ENTITY_FILE,
+            array(self::PARAM_FOLDER => $folder ?? self::FOLDER_UNSET),
+            array('name' => 'ASC'),
+            null,
+            array('id', 'name', 'type', 'size', 'width', 'height', 'folder'),
+            null,
+            false,
+            $page,
+            self::ITEMS_PER_PAGE
+        );
+
+        $records = is_array($result) ? ($result['objects'] ?? array()) : array();
+        $total   = is_array($result) ? (int) ($result['totalObjects'] ?? 0) : 0;
+
+        /* Clamped the way the core clamps it, so the pager and the address cannot disagree. */
+        $pages = max(1, (int) ceil($total / self::ITEMS_PER_PAGE));
+        $page  = min($page, $pages);
+
+        $base = $manager->getPrefix().'/files/';
+
         $html = $this->app[TemplateRenderer::CONTAINER_KEY]->render('files.html.twig', array(
             'title'      => 'Dateien — '.$manager->getTitle(),
             'stylesheet' => $manager->assetUrl('admin.css'),
             'importmap'  => Importmap::scriptTag($manager),
             'menu'       => $this->app[MenuBuilder::CONTAINER_KEY]->build(),
             'logoutUrl'  => $manager->getPrefix().'/logout',
+            'tree'       => $tree === null ? null : self::treeLinks($tree, $base, $folder),
+            'trail'      => $tree === null ? array() : self::trail($tree, $folder, $base),
+            'rootUrl'    => $base,
+            'isRoot'     => $folder === null,
+            'files'      => self::rows($records),
+            'pagination' => array(
+                'page'    => $page,
+                'pages'   => $pages,
+                'total'   => $total,
+                'prevUrl' => $page > 1 ? self::url($base, $folder, $page - 1) : null,
+                'nextUrl' => $page < $pages ? self::url($base, $folder, $page + 1) : null,
+            ),
         ));
 
         return new Response($html, 200, array('Content-Type' => 'text/html; charset=UTF-8'));
+    }
+
+    /**
+     * The folder the address asks for, or `null` for the root.
+     *
+     * AN UNKNOWN FOLDER FALLS BACK TO THE ROOT RATHER THAN ANSWERING 404. The folder is view
+     * state in the query string, like the list's sort column and page number, and the list
+     * clamps invalid state instead of refusing it (ADR 0018). A folder that was deleted while
+     * someone had the page open is the ordinary way to get here, and dropping them at the root
+     * is a better answer than a page that reads like a broken link.
+     *
+     * WITHOUT THE RIGHT TO READ FOLDERS IT CANNOT BE CHECKED, so it is passed through as an
+     * opaque filter value — an unknown id then simply matches no file (verified against the
+     * running harness). That asymmetry is deliberate: the alternative would be to deny a folder
+     * view to an editor who may read the files in it.
+     */
+    private static function requestedFolder(Request $request, ?array $tree, bool $mayReadFolders): ?string
+    {
+        $wanted = $request->query->get(self::PARAM_FOLDER);
+
+        if (!is_string($wanted) || $wanted === '') {
+            return null;
+        }
+
+        if (!$mayReadFolders) {
+            return $wanted;
+        }
+
+        return self::find($tree ?? array(), $wanted) === null ? null : $wanted;
+    }
+
+    /** The node with this id, anywhere in the tree, or `null`. */
+    private static function find(array $nodes, string $id): ?array
+    {
+        foreach ($nodes as $node) {
+            if (($node['id'] ?? null) === $id) {
+                return $node;
+            }
+
+            if (($found = self::find($node['childs'] ?? array(), $id)) !== null) {
+                return $found;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The tree, with a URL and an open/current marker on every node.
+     *
+     * THE ADDRESSES ARE BUILT HERE AND NOT IN TWIG, the rule the list view follows for the same
+     * reason: a template that concatenates URLs is a second place that has to know about the
+     * prefix and the parameter name.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function treeLinks(array $nodes, string $base, ?string $current): array
+    {
+        $items = array();
+
+        foreach ($nodes as $node) {
+            $id = (string) ($node['id'] ?? '');
+
+            $items[] = array(
+                'id'      => $id,
+                'title'   => ($node['title'] ?? '') === '' ? self::EMPTY_CELL : $node['title'],
+                'url'     => self::url($base, $id, 1),
+                'current' => $id === $current,
+                'childs'  => self::treeLinks($node['childs'] ?? array(), $base, $current),
+            );
+        }
+
+        return $items;
+    }
+
+    /**
+     * The path from the root down to the open folder, as links.
+     *
+     * IT IS THE WAY BACK UP, and it has to be derived rather than remembered: the editor may
+     * have arrived from a bookmark, where there is no history to walk back through. In the root
+     * it is empty, so the template renders no trail at all instead of a link that leads where
+     * the reader already is.
+     *
+     * @return list<array{title: string, url: string, current: bool}>
+     */
+    private static function trail(array $nodes, ?string $folder, string $base): array
+    {
+        if ($folder === null) {
+            return array();
+        }
+
+        $path = self::pathTo($nodes, $folder);
+        $trail = array();
+
+        foreach ($path as $i => $node) {
+            $trail[] = array(
+                'title'   => ($node['title'] ?? '') === '' ? self::EMPTY_CELL : (string) $node['title'],
+                'url'     => self::url($base, (string) $node['id'], 1),
+                'current' => $i === count($path) - 1,
+            );
+        }
+
+        return $trail;
+    }
+
+    /**
+     * The chain of nodes from the root to this id, or an empty list if it is not in the tree.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function pathTo(array $nodes, string $id): array
+    {
+        foreach ($nodes as $node) {
+            if (($node['id'] ?? null) === $id) {
+                return array($node);
+            }
+
+            $below = self::pathTo($node['childs'] ?? array(), $id);
+
+            if ($below !== array()) {
+                return array_merge(array($node), $below);
+            }
+        }
+
+        return array();
+    }
+
+    /** One row per file, formatted — the template receives no raw values to format itself. */
+    private static function rows(array $records): array
+    {
+        $rows = array();
+
+        foreach ($records as $record) {
+            $values = is_array($record) ? $record : (array) $record;
+
+            $rows[] = array(
+                'id'   => (string) ($values['id'] ?? ''),
+                'name' => ($values['name'] ?? '') === '' ? self::EMPTY_CELL : (string) $values['name'],
+                'type' => ($values['type'] ?? '') === '' ? self::EMPTY_CELL : (string) $values['type'],
+                'size' => self::humanSize($values['size'] ?? null),
+            );
+        }
+
+        return $rows;
+    }
+
+    /**
+     * A byte count as something a person reads.
+     *
+     * Kept here rather than in a helper: it has one caller, and the package's rule is no
+     * abstraction for single-use code.
+     */
+    private static function humanSize($bytes): string
+    {
+        if (!is_numeric($bytes)) {
+            return self::EMPTY_CELL;
+        }
+
+        $bytes = (float) $bytes;
+
+        foreach (array('B', 'KB', 'MB', 'GB') as $i => $unit) {
+            if ($bytes < 1024 || $unit === 'GB') {
+                return ($i === 0 ? (string) (int) $bytes : number_format($bytes, 1, ',', '.')).' '.$unit;
+            }
+
+            $bytes /= 1024;
+        }
+
+        return self::EMPTY_CELL;
+    }
+
+    /** The page number the address asks for, never below one. */
+    private static function page(Request $request): int
+    {
+        $page = $request->query->get('page');
+
+        return is_numeric($page) ? max(1, (int) $page) : 1;
+    }
+
+    /**
+     * One address of this view.
+     *
+     * ONLY THE PARAMETERS THAT CARRY STATE ARE WRITTEN, and the defaults are left out — a root
+     * address stays `…/files/` instead of `…/files/?folder=&page=1`, so the plain address and
+     * the one a link produces are the same string.
+     */
+    private static function url(string $base, ?string $folder, int $page): string
+    {
+        $query = array();
+
+        if ($folder !== null && $folder !== '') {
+            $query[self::PARAM_FOLDER] = $folder;
+        }
+
+        if ($page > 1) {
+            $query['page'] = $page;
+        }
+
+        return $query === array() ? $base : $base.'?'.http_build_query($query);
     }
 }
