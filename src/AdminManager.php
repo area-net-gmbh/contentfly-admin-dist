@@ -71,6 +71,7 @@ final class AdminManager
         'entities'  => [],
         'assetPath' => '',
         'thumbnailAlias' => 'pim_list',
+        'uploadAccept'   => '',
     ];
 
     /**
@@ -106,6 +107,9 @@ final class AdminManager
     /** Alias of the `PIM\ThumbnailSetting` row the file manager's previews are built from. */
     private string $thumbnailAlias;
 
+    /** `accept` value the upload offers the browser; empty means no pre-check at all. */
+    private string $uploadAccept;
+
     /**
      * @param array<string,mixed> $options See self::DEFAULTS for the accepted keys.
      *
@@ -130,6 +134,7 @@ final class AdminManager
         $this->entities  = self::validateEntities($options['entities']);
         $this->assetPath = self::validateAssetPath($options['assetPath'], $this->prefix);
         $this->thumbnailAlias = self::validateThumbnailAlias($options['thumbnailAlias']);
+        $this->uploadAccept   = self::validateUploadAccept($options['uploadAccept']);
 
         $this->registerServices();
         $this->mountRoutes();
@@ -643,6 +648,56 @@ final class AdminManager
         }
 
         return $alias;
+    }
+
+    /**
+     * The file types the upload offers the browser as a pre-check.
+     *
+     * EMPTY BY DEFAULT, AND THAT IS THE HONEST VALUE. What a project actually accepts is decided
+     * by the core's `FILE_ALLOWED_TYPES` and the extension blocklist in
+     * `Classes/File/UploadValidator.php` — and neither is readable through any API endpoint, the
+     * same situation as the thumbnail aliases (Schema-Vertrag L25). A list guessed here would be
+     * wrong in the unpleasant direction: it would turn away a file the server would have taken.
+     * So the browser pre-checks only what a project states, and states nothing by default.
+     *
+     * THE SERVER STAYS THE AUTHORITY even when this is set. The value is comfort — it spares the
+     * editor a pointless upload, it never decides the outcome (ADR 0021).
+     */
+    public function getUploadAccept(): string
+    {
+        return $this->uploadAccept;
+    }
+
+    /**
+     * @param mixed $accept
+     */
+    private static function validateUploadAccept($accept): string
+    {
+        if (!is_string($accept)) {
+            throw new \InvalidArgumentException('The option "uploadAccept" must be a string, for example "image/*,.pdf". Empty means no pre-check in the browser.');
+        }
+
+        $accept = trim($accept);
+
+        if ($accept === '') {
+            return '';
+        }
+
+        /*
+         * IT ENDS UP IN AN HTML ATTRIBUTE AND IN A JAVASCRIPT COMPARISON, so the character set is
+         * held to what an `accept` value legitimately needs: media types, extensions, the `*`
+         * wildcard and the commas between them. Twig escapes the attribute anyway — this is the
+         * same stance `validateAssetPath()` and `validateThumbnailAlias()` take, namely that
+         * configuration is validated where a project looks at it, not where it later travels.
+         */
+        if (preg_match('#^[A-Za-z0-9/.*+,\- ]+$#', $accept) !== 1) {
+            throw new \InvalidArgumentException(sprintf(
+                'The option "uploadAccept" carries "%s", which is not a list of media types or extensions — expected something like "image/*,.pdf".',
+                $accept
+            ));
+        }
+
+        return $accept;
     }
 
     private static function validateAssetPath($assetPath, string $prefix): string

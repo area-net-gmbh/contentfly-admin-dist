@@ -11,6 +11,7 @@ use Areanet\ContentflyAdmin\Schema\Envelope;
 use Areanet\ContentflyAdmin\View\MenuBuilder;
 use Areanet\ContentflyAdmin\View\TemplateRenderer;
 use Areanet\PIM\Classes\Api;
+use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\HttpKernelInterface;
@@ -81,10 +82,33 @@ final class FileController
     /** The form field that names the action a POST asks for. */
     public const ACTION_FIELD = 'action';
 
-    /** The three write actions this view offers. Files only — folders are navigation (ADR 0020). */
+    /** The write actions this view offers. Files only — folders are navigation (ADR 0020). */
     public const RENAME = 'rename';
     public const MOVE   = 'move';
     public const DELETE = 'delete';
+
+    /**
+     * Uploading one file.
+     *
+     * ONE FILE PER REQUEST, not a batch (ADR 0021). A batch POST that exceeds `post_max_size`
+     * arrives with an empty `$_POST` — the token field included —, so a size problem would be
+     * reported as an expired form and the editor would look in the wrong place. A per-file
+     * progress bar is not derivable from a batch either: `upload.onprogress` only knows the
+     * total.
+     */
+    public const UPLOAD = 'upload';
+
+    /**
+     * The field that asks for a machine-readable answer instead of the redirect.
+     *
+     * AN EXPLICIT FIELD AND NOT `Accept` (ADR 0021). The uploading controller builds its own
+     * `FormData`, so it can state what it wants; a header would leave the answer's shape to a
+     * browser default, and the gate would have to forge headers to test either branch.
+     */
+    public const FORMAT_FIELD = '_format';
+
+    /** The one value `FORMAT_FIELD` understands. Anything else is the ordinary redirect. */
+    public const FORMAT_JSON = 'json';
 
     /**
      * The parameter names the report owns.
@@ -104,6 +128,17 @@ final class FileController
      * mounts itself and the admin refuses to be mounted on (`AdminManager::RESERVED_PREFIXES`).
      */
     private const CORE_FILE_ROUTE = '/file/get';
+
+    /**
+     * The core's upload route, and the field it reads the file from.
+     *
+     * Fixed for the same reason as `CORE_FILE_ROUTE`: `file` is a prefix the core mounts itself.
+     * The field name is the core's too — `uploadAction` asks `$request->files->get('file')`
+     * (`Controller/FileController.php:100`), so the form's input has to be called that and
+     * nothing else.
+     */
+    private const CORE_UPLOAD_ROUTE = '/file/upload';
+    private const CORE_UPLOAD_FIELD = 'file';
 
     /**
      * The types a derivative can be made from.
@@ -305,21 +340,37 @@ final class FileController
         $from = $request->request->get(self::PARAM_FOLDER);
         $from = is_string($from) && $from !== '' ? $from : null;
 
+        /*
+         * THE ACTION IS READ BEFORE THE TOKEN IS CHECKED, and only because the *shape* of the
+         * answer depends on it: a refused upload still has to refuse in the format its caller
+         * asked for. Nothing acts on the value before the check — the token gates every write
+         * below exactly as before, and `_format` is a form field, never a permission.
+         */
+        $action = $request->request->get(self::ACTION_FIELD);
+
         if (!FormToken::verify($request)) {
-            return self::back($base, $from, array('done' => 'expired'));
+            return self::answer($request, $base, $from, array('done' => 'expired'));
+        }
+
+        /*
+         * THE UPLOAD IS HANDLED BEFORE THE `id` CHECK BECAUSE IT HAS NO `id` — it creates a
+         * record instead of addressing one. Forwarding one would not be a harmless extra either:
+         * with an `id`, the core's `uploadAction` is the overwrite path and *replaces* that file
+         * (`Controller/FileController.php:143`, `:157`).
+         */
+        if ($action === self::UPLOAD) {
+            return $this->upload($request, $base, $from);
         }
 
         $id = $request->request->get('id');
 
         if (!is_string($id) || $id === '') {
-            return self::back($base, $from, array('done' => 'missing'));
+            return self::answer($request, $base, $from, array('done' => 'missing'));
         }
-
-        $action = $request->request->get(self::ACTION_FIELD);
 
         if ($action === self::DELETE) {
             if (!$this->mayDelete(self::ENTITY_FILE)) {
-                return self::back($base, $from, array('done' => 'forbidden'));
+                return self::answer($request, $base, $from, array('done' => 'forbidden'));
             }
 
             $envelope = $this->call($request, '/api/delete', array(
@@ -327,19 +378,19 @@ final class FileController
                 'id'     => $id,
             ));
 
-            return self::back($base, $from, self::outcome(self::DELETE, $envelope));
+            return self::answer($request, $base, $from, self::outcome(self::DELETE, $envelope));
         }
 
         if ($action === self::RENAME || $action === self::MOVE) {
             if (!$this->mayWrite(self::ENTITY_FILE)) {
-                return self::back($base, $from, array('done' => 'forbidden'));
+                return self::answer($request, $base, $from, array('done' => 'forbidden'));
             }
 
             if ($action === self::RENAME) {
                 $name = $request->request->get('name');
 
                 if (!is_string($name) || trim($name) === '') {
-                    return self::back($base, $from, array('done' => 'name'));
+                    return self::answer($request, $base, $from, array('done' => 'name'));
                 }
 
                 $data = array('name' => trim($name));
@@ -360,10 +411,96 @@ final class FileController
                 'data'   => $data,
             ));
 
-            return self::back($base, $from, self::outcome($action, $envelope));
+            return self::answer($request, $base, $from, self::outcome($action, $envelope));
         }
 
-        return self::back($base, $from, array('done' => 'unknown'));
+        return self::answer($request, $base, $from, array('done' => 'unknown'));
+    }
+
+    /**
+     * Uploading one file into the folder the editor is looking at.
+     *
+     * THE UPLOADED FILE IS PASSED THROUGH UNTOUCHED, never rebuilt. The core stores it with
+     * `move_uploaded_file()` (`Controller/FileController.php:271`, `:331`), which accepts only a
+     * genuine PHP upload and fails **silently** for anything else — a freshly constructed
+     * `UploadedFile` would look correct here and store nothing.
+     *
+     * THE TARGET IS THE FOLDER THE EDITOR CAME FROM, and for this one action that is also the
+     * return address: the drop zone belongs to the folder currently open, and that is where the
+     * editor stays. An absent folder is the root, which the core reaches by being told nothing.
+     *
+     * NO TYPE CHECK OF ITS OWN. `uploadAccept` is the browser's pre-check (ADR 0021); what is
+     * really permitted sits in the core's `FILE_ALLOWED_TYPES` and the extension blocklist of
+     * `Classes/File/UploadValidator.php`, and the validator's verdict travels back as the code
+     * `outcome()` keeps.
+     */
+    private function upload(Request $request, string $base, ?string $folder): Response
+    {
+        if (!$this->mayWrite(self::ENTITY_FILE)) {
+            return self::answer($request, $base, $folder, array('done' => 'forbidden'));
+        }
+
+        $file = $request->files->get(self::CORE_UPLOAD_FIELD);
+
+        if (!$file instanceof UploadedFile) {
+            return self::answer($request, $base, $folder, array('done' => 'missing'));
+        }
+
+        $status   = null;
+        $envelope = $this->call(
+            $request,
+            self::CORE_UPLOAD_ROUTE,
+            $folder === null ? array() : array(self::PARAM_FOLDER => $folder),
+            array(self::CORE_UPLOAD_FIELD => $file),
+            $status
+        );
+
+        return self::answer($request, $base, $folder, self::outcome(self::UPLOAD, $envelope, $status));
+    }
+
+    /**
+     * The answer to a write, in the shape the caller asked for.
+     *
+     * TWO SHAPES, ONE VERDICT (ADR 0021). The redirect is what a plain form post needs, and the
+     * drop zone *is* a plain form when the browser runs no JavaScript. An `XMLHttpRequest` cannot
+     * use a redirect: it needs the verdict for this one file, and it needs to tell a size problem
+     * from a rejected extension so the right row can say the right thing.
+     *
+     * THE SENTENCE COMES FROM THE SAME TABLE EITHER WAY. The JSON carries the finished text
+     * instead of a code to be translated in the browser, so the wording lives in one place and
+     * the uploading controller cannot drift from what the page itself would have said.
+     *
+     * @param array<string,string> $report
+     */
+    private static function answer(Request $request, string $base, ?string $folder, array $report): Response
+    {
+        if (!self::wantsJson($request)) {
+            return self::back($base, $folder, $report);
+        }
+
+        $sentence = self::sentence($report);
+
+        /*
+         * 200 EVEN FOR A REFUSAL, exactly as the redirect answers 303 for one: this route handled
+         * the request, and what the core made of the write is the payload. The caller reads `ok`
+         * and has one place to look instead of two.
+         */
+        return new Response(
+            (string) json_encode(array(
+                'ok'   => $sentence !== null && $sentence['ok'],
+                'done' => $report['done'] ?? '',
+                'code' => $report['code'] ?? '',
+                'text' => $sentence === null ? '' : $sentence['text'],
+            ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            200,
+            array('Content-Type' => 'application/json; charset=UTF-8')
+        );
+    }
+
+    /** Whether this submission asked for the machine-readable answer rather than the redirect. */
+    private static function wantsJson(Request $request): bool
+    {
+        return ($request->request->all()[self::FORMAT_FIELD] ?? null) === self::FORMAT_JSON;
     }
 
     /**
@@ -373,17 +510,24 @@ final class FileController
      * guarded main request's `auth.user` is the one the core checks its own per-record permission
      * against — the same shape the form and the bulk actions use.
      *
-     * @param array<string,mixed> $payload
+     * FILES TRAVEL IN THE FIFTH ARGUMENT, and the instance has to be the main request's own — see
+     * `upload()` for why rebuilding one fails without saying so.
+     *
+     * @param array<string,mixed>        $payload
+     * @param array<string,UploadedFile> $files
+     * @param int|null                   $status Filled with the core's HTTP status, for the one
+     *                                          caller that needs it when there is no envelope
      *
      * @return array{ok: bool, readable: bool, data: mixed, error: array<string,mixed>|null}
      */
-    private function call(Request $request, string $endpoint, array $payload): array
+    private function call(Request $request, string $endpoint, array $payload, array $files = array(), ?int &$status = null): array
     {
-        $sub = Request::create($endpoint, 'POST', $payload, array(), array(), $request->server->all());
+        $sub = Request::create($endpoint, 'POST', $payload, array(), $files, $request->server->all());
 
         $response = $this->app->handle($sub, HttpKernelInterface::SUB_REQUEST);
+        $status   = $response->getStatusCode();
 
-        return Envelope::read($response->getContent(), $response->getStatusCode());
+        return Envelope::read($response->getContent(), $status);
     }
 
     /**
@@ -393,11 +537,24 @@ final class FileController
      * what distinguishes a name that is already taken from a record somebody else deleted in the
      * meantime, and the editor can act on the difference.
      *
+     * WITHOUT AN ENVELOPE THE HTTP STATUS IS WHAT IS LEFT, and for the upload that is the whole
+     * point. `/file/upload` does not answer an envelope when it refuses: the validator throws a
+     * `ContentflyException`, and the core's handler only builds the envelope for a request whose
+     * content type it recognises — `AcceptHeader::fromString()` does not match
+     * `multipart/form-data` once the mandatory `boundary` parameter is attached, so with
+     * `APP_DEBUG` on an upload refusal comes back as the debug page (gap L26, measured). Reading
+     * a code out of that page would be the text-guessing `Schema\Envelope` refuses to do, so the
+     * status takes over — 413 and 415 are exactly the two cases that have to stay apart.
+     *
+     * The other three write paths pass no status and keep their previous behaviour. They reach
+     * `/api/*` and share the same gap; widening their reports belongs to a task of its own, not
+     * to this branch.
+     *
      * @param array{ok: bool, readable: bool, data: mixed, error: array<string,mixed>|null} $envelope
      *
      * @return array<string,string>
      */
-    private static function outcome(string $action, array $envelope): array
+    private static function outcome(string $action, array $envelope, ?int $status = null): array
     {
         if ($envelope['ok']) {
             return array('done' => $action);
@@ -405,7 +562,11 @@ final class FileController
 
         $code = is_array($envelope['error']) ? ($envelope['error']['code'] ?? null) : null;
 
-        return array('done' => 'failed', 'code' => is_string($code) ? $code : '');
+        if (!is_string($code) || $code === '') {
+            $code = !$envelope['readable'] && $status !== null ? 'HTTP '.$status : '';
+        }
+
+        return array('done' => 'failed', 'code' => $code);
     }
 
     /**
@@ -439,6 +600,34 @@ final class FileController
             return null;
         }
 
+        $code = $request->query->get('code');
+
+        return self::sentence(array(
+            'done' => $done,
+            'code' => is_string($code) ? $code : '',
+        ));
+    }
+
+    /**
+     * The sentence one report deserves — the page's and the JSON answer's single source.
+     *
+     * SPLIT OUT OF `report()` SO THERE IS ONE WORDING, not one per output. The uploading
+     * controller shows these texts next to its rows; drafting them again in JavaScript would
+     * have let the two drift apart, and the drift would only ever show up in the failure cases
+     * nobody looks at twice.
+     *
+     * @param array<string,string> $report
+     *
+     * @return array{ok: bool, text: string}|null
+     */
+    private static function sentence(array $report): ?array
+    {
+        $done = $report['done'] ?? '';
+
+        if ($done === '') {
+            return null;
+        }
+
         $refusals = array(
             'expired'   => 'Die Aktion ist abgelaufen oder wurde nicht von dieser Seite abgeschickt. Bitte erneut absenden.',
             'missing'   => 'Es war keine Datei angegeben — es wurde nichts geändert.',
@@ -452,12 +641,12 @@ final class FileController
         }
 
         if ($done === 'failed') {
-            $code = $request->query->get('code');
+            $code = $report['code'] ?? '';
 
             return array(
                 'ok'   => false,
                 'text' => 'Die Aktion ist fehlgeschlagen'
-                    .(is_string($code) && $code !== '' ? ' ('.$code.')' : '').' — es wurde nichts geändert.',
+                    .($code !== '' ? ' ('.$code.')' : '').' — es wurde nichts geändert.',
             );
         }
 
@@ -465,6 +654,7 @@ final class FileController
             self::RENAME => 'Die Datei ist umbenannt.',
             self::MOVE   => 'Die Datei ist verschoben.',
             self::DELETE => 'Die Datei ist gelöscht.',
+            self::UPLOAD => 'Die Datei ist hochgeladen.',
         );
 
         return isset($erfolge[$done]) ? array('ok' => true, 'text' => $erfolge[$done]) : null;
