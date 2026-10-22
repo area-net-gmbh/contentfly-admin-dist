@@ -24,8 +24,10 @@ export default class extends Controller {
     connect() {
         this.onRow = () => this.update();
         this.onAll = () => this.toggleAll();
+        this.onSubmit = (event) => this.guardDelete(event);
 
         this.rowTargets.forEach((row) => row.addEventListener('change', this.onRow));
+        this.element.addEventListener('submit', this.onSubmit);
 
         if (this.hasAllTarget) {
             this.allTarget.addEventListener('change', this.onAll);
@@ -36,6 +38,7 @@ export default class extends Controller {
 
     disconnect() {
         this.rowTargets.forEach((row) => row.removeEventListener('change', this.onRow));
+        this.element.removeEventListener('submit', this.onSubmit);
 
         if (this.hasAllTarget) {
             this.allTarget.removeEventListener('change', this.onAll);
@@ -48,6 +51,33 @@ export default class extends Controller {
 
     get checked() {
         return this.rowTargets.filter((row) => row.checked);
+    }
+
+    /*
+     * A DELETE OVER A SELECTION IS ASKED BACK, and the browser's own dialog is what asks. There
+     * is no undo behind it: the core deletes one record per call and nothing collects them again.
+     * Without this module the dialog is missing and the delete goes through on the first press —
+     * that is the honest consequence of the no-JavaScript fallback and not a hole to paper over
+     * here, because a server-side confirmation step would be a second page in the way of every
+     * single delete.
+     *
+     * `event.submitter` IS WHAT MAKES THIS PRECISE. The same form carries the change action, and
+     * reading the pressed button is the only way to tell the two apart — a guard on the form as a
+     * whole would ask the question before an ordinary field change as well.
+     */
+    guardDelete(event) {
+        const pressed = event.submitter;
+
+        if (pressed === null || pressed === undefined || pressed.value !== 'delete') {
+            return;
+        }
+
+        const picked = this.checked.length;
+        const what = picked === 1 ? 'Ein Datensatz wird' : `${picked} Datensätze werden`;
+
+        if (!window.confirm(`${what} gelöscht. Das kann nicht zurückgenommen werden.`)) {
+            event.preventDefault();
+        }
     }
 
     toggleAll() {

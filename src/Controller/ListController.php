@@ -191,6 +191,10 @@ final class ListController
         $token     = FormToken::issue($request);
         $selection = self::selection($rows, $manager->getPrefix(), $name, $base, $order, $page, $token);
 
+        if ($selection !== null) {
+            $selection['fields'] = $this->app[EntityView::CONTAINER_KEY]->changeableFields($name);
+        }
+
         /*
          * THE SEARCH BOX IS THE ONLY REASON THIS PAGE NEEDS A MODULE, so it is asked for only
          * where there is one — the same per-page decision the form view makes in
@@ -217,6 +221,7 @@ final class ListController
             'columns'    => self::sortableColumns($columns, $base, $query, $sort, $direction, $page),
             'rows'       => $rows,
             'selection'  => $selection,
+            'report'     => self::report($request),
             'newUrl'     => $formBase,
             'queryForm'   => $queryForm,
             'controllers' => $controllers,
@@ -638,6 +643,107 @@ final class ListController
     }
 
     /**
+     * What a bulk action left to say, or `null` when this is an ordinary view of the list.
+     *
+     * THE SENTENCE IS BUILT HERE, OUT OF PARTS THE URL ONLY NAMES. `BulkController` redirects
+     * back with an action, two counts, a few ids and at most one error code — never with prose.
+     * Everything the reader sees is composed from those parts against the wordings below, so a
+     * crafted address cannot put a sentence of its own on this page. It can show a wrong count,
+     * which is why the failing ids are named next to it: a number alone would be the whole claim.
+     *
+     * AN UNKNOWN CODE STILL PRODUCES A REASON. The core's codes are stable identifiers and the
+     * two that a selection runs into are the two below, but a third would otherwise leave the
+     * report saying that something failed and nothing about why — so the code itself is shown.
+     * Twig escapes it; it is an identifier, not markup.
+     *
+     * @return array{ok: bool, text: string}|null
+     */
+    private static function report(Request $request): ?array
+    {
+        $bulk = $request->query->get('bulk');
+
+        if (!is_string($bulk) || $bulk === '') {
+            return null;
+        }
+
+        /* The refusals that never got as far as the core. */
+        $refusals = array(
+            'expired' => 'Die Aktion ist abgelaufen oder wurde nicht von dieser Seite abgeschickt. Bitte erneut markieren.',
+            'none'    => 'Es war kein Datensatz markiert — es wurde nichts geändert.',
+            'field'   => 'Das zu ändernde Feld gibt es an dieser Entität nicht oder es ist schreibgeschützt.',
+            'value'   => 'Zu dem gewählten Feld war kein Wert angegeben.',
+            'unknown' => 'Die Aktion ist unbekannt — es wurde nichts geändert.',
+        );
+
+        if (isset($refusals[$bulk])) {
+            return array('ok' => false, 'text' => $refusals[$bulk]);
+        }
+
+        if ($bulk !== BulkController::DELETE && $bulk !== BulkController::CHANGE) {
+            return null;
+        }
+
+        $done   = (int) $request->query->get('done', '0');
+        $failed = (int) $request->query->get('failed', '0');
+
+        $verb = $bulk === BulkController::DELETE
+            ? array('gelöscht', 'löschen')
+            : array('geändert', 'ändern');
+
+        $text = $done === 1
+            ? '1 Datensatz '.$verb[0].'.'
+            : $done.' Datensätze '.$verb[0].'.';
+
+        if ($failed > 0) {
+            $text .= ' '.($failed === 1 ? 'Einen Datensatz' : $failed.' Datensätze')
+                .' konnte der Admin nicht '.$verb[1].': '.self::named($request)
+                .self::reason($request);
+        }
+
+        return array('ok' => $failed === 0, 'text' => $text);
+    }
+
+    /**
+     * The ids the report names, as a readable enumeration.
+     *
+     * `BulkController::NAMED_FAILURES` caps how many travel, so this says "und weitere" where the
+     * selection had more — a list that silently stopped would read like the complete answer.
+     */
+    private static function named(Request $request): string
+    {
+        $ids = array_filter(explode(',', (string) $request->query->get('ids', '')));
+
+        if ($ids === array()) {
+            return 'die Markierung ist nicht mehr nachvollziehbar.';
+        }
+
+        $named = implode(', ', $ids);
+        $failed = (int) $request->query->get('failed', '0');
+
+        return $failed > count($ids) ? $named.' und weitere.' : $named.'.';
+    }
+
+    /**
+     * The reason for a refusal, as a sentence, or an empty string when the core named none.
+     */
+    private static function reason(Request $request): string
+    {
+        $code = $request->query->get('code');
+
+        if (!is_string($code) || $code === '') {
+            return '';
+        }
+
+        $reasons = array(
+            'contentfly_general_access_denied' => ' Grund: fehlende Berechtigung.',
+            'contentfly_general_not_found'     => ' Grund: der Datensatz existiert nicht mehr.',
+            BulkController::UNREADABLE         => ' Die Antwort des Grundsystems war nicht auswertbar.',
+        );
+
+        return $reasons[$code] ?? ' Grund (Meldung des Grundsystems): '.$code.'.';
+    }
+
+    /**
      * What the selection form needs, or `null` when this page has nothing to select.
      *
      * THE FORM IS A SECOND FORM, NOT A WRAPPER AROUND THE FIRST. The query bar is a GET form and
@@ -655,7 +761,7 @@ final class ListController
      * @param list<array{cells: array<string,string>, id: string|null, editUrl: string|null}> $rows
      * @param array<string,string|array<string,string>|null>                                  $order
      *
-     * @return array{action: string, tokenField: string, token: string, query: string}|null
+     * @return array{action: string, tokenField: string, token: string, query: string, actionField: string, delete: string, change: string}|null
      */
     private static function selection(
         array $rows,
@@ -671,10 +777,13 @@ final class ListController
                 $here = self::url($base, $order + array('page' => $page));
 
                 return array(
-                    'action'     => $prefix.'/bulk/'.MenuBuilder::entityToUrl($name),
-                    'tokenField' => FormToken::FIELD,
-                    'token'      => $token,
-                    'query'      => (string) parse_url($here, PHP_URL_QUERY),
+                    'action'      => $prefix.'/bulk/'.MenuBuilder::entityToUrl($name),
+                    'tokenField'  => FormToken::FIELD,
+                    'token'       => $token,
+                    'query'       => (string) parse_url($here, PHP_URL_QUERY),
+                    'actionField' => BulkController::ACTION_FIELD,
+                    'delete'      => BulkController::DELETE,
+                    'change'      => BulkController::CHANGE,
                 );
             }
         }

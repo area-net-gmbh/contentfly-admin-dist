@@ -109,6 +109,21 @@ final class EntityView
         'rte',
     );
 
+    /**
+     * The field types a bulk change offers a control for — `changeableFields()` explains why.
+     *
+     * @var list<string>
+     */
+    public const CHANGEABLE_TYPES = array(
+        'boolean',
+        'integer',
+        'decimal',
+        'float',
+        'string',
+        'textarea',
+        'select',
+    );
+
     private SchemaClient $schemaClient;
 
     private ColumnBuilder $columnBuilder;
@@ -206,6 +221,88 @@ final class EntityView
         }
 
         return $filters;
+    }
+
+    /**
+     * The fields a bulk change may set, in form order.
+     *
+     * ADR 0018 §5 SETTLED ON ONE FIELD AND ONE VALUE, and this list says which fields can be that
+     * one. It starts from `formFields()`, so the question "may this be written at all" is answered
+     * exactly once in this package: a field the entity marks `readonly`, one the core computes,
+     * one `hide` keeps out of the admin and one whose type has no writable control are already
+     * gone before this method sees them.
+     *
+     * THE TYPE ALLOWLIST IS NARROWER THAN THE FORM'S, and deliberately so. A bulk change has one
+     * control for every selected record at once, so the control has to make sense without the
+     * record in front of it: a number, a text, a yes/no, a choice out of a fixed list. A relation
+     * is left out because its options depend on a query per field, a date because a bulk date is
+     * almost always the wrong answer, and a file because there is nothing to upload to twenty
+     * records in one go. None of that is a refusal in principle — each is a control this story
+     * does not build, and adding one here is a type in this list plus a branch in the template.
+     *
+     * @param string $entity Entity name as the schema spells it
+     *
+     * @return list<array{property: string, label: string, type: string, options: list<array{value: string, label: string}>|null, maxlength: int|null}>
+     */
+    public function changeableFields(string $entity): array
+    {
+        $changeable = array();
+
+        foreach ($this->formFields($entity) as $field) {
+            $widget = $field['widget'];
+            $type   = $widget['type'] ?? null;
+
+            if (($widget['readonly'] ?? false) === true) {
+                continue;
+            }
+
+            if (!is_string($type) || !in_array($type, self::CHANGEABLE_TYPES, true)) {
+                continue;
+            }
+
+            $options   = $widget['options'] ?? null;
+            $maxlength = $widget['maxlength'] ?? null;
+
+            /* A `select` without options cannot be set to anything — the form shows it, a bulk
+             * change cannot offer it. */
+            if ($type === 'select' && !is_array($options)) {
+                continue;
+            }
+
+            $changeable[] = array(
+                'property'  => $field['property'],
+                'label'     => $field['label'],
+                'type'      => $type,
+                'options'   => is_array($options) ? self::labelled($options) : null,
+                'maxlength' => is_int($maxlength) ? $maxlength : null,
+            );
+        }
+
+        return $changeable;
+    }
+
+    /**
+     * A core `options` list as a control can render it.
+     *
+     * The core states them as a plain list of strings; the admin needs a value and a label, and
+     * for a fixed choice those are the same string. Kept here rather than in the template so the
+     * shape matches the one `RelationOptions` answers with — one shape, two sources.
+     *
+     * @param list<mixed> $options
+     *
+     * @return list<array{value: string, label: string}>
+     */
+    private static function labelled(array $options): array
+    {
+        $labelled = array();
+
+        foreach ($options as $option) {
+            if (is_scalar($option)) {
+                $labelled[] = array('value' => (string) $option, 'label' => (string) $option);
+            }
+        }
+
+        return $labelled;
     }
 
     /**

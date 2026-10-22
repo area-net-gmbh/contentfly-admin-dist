@@ -790,3 +790,43 @@ li {
     color: var(--admin-muted);
     font-size: 0.875rem;
 }
+
+/*
+ * The report of a finished bulk action, and the controls that start one (002-004-0005).
+ *
+ * THE PROBLEM VARIANT USES THE DANGER TOKENS THE FORM ALREADY DEFINES, rather than a second pair
+ * of red values — one red in this stylesheet, two readers.
+ */
+
+.admin-list__report {
+    margin: 0 0 1rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--admin-rule);
+    border-radius: 4px;
+}
+
+.admin-list__report--problem {
+    border-color: var(--admin-danger);
+    background: var(--admin-danger-surface);
+    color: var(--admin-danger-text);
+}
+
+.admin-list__bulk-bar {
+    flex-wrap: wrap;
+}
+
+.admin-list__bulk-change {
+    flex: 1 1 100%;
+}
+
+.admin-list__bulk-field {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0.5rem 0 0;
+}
+
+.admin-list__bulk-apply {
+    margin: 0.75rem 0 0;
+}

@@ -9,6 +9,7 @@ use Areanet\ContentflyAdmin\Auth\LoginScreen;
 use Areanet\ContentflyAdmin\Controller\AdminController;
 use Areanet\ContentflyAdmin\Command\PublishAssetsCommand;
 use Areanet\ContentflyAdmin\Controller\AssetController;
+use Areanet\ContentflyAdmin\Controller\BulkController;
 use Areanet\ContentflyAdmin\Controller\FormController;
 use Areanet\ContentflyAdmin\Controller\ListController;
 use Areanet\ContentflyAdmin\Controller\OptionsController;
@@ -403,6 +404,24 @@ final class AdminManager
         $this->app['routeManager']
             ->mount($this->prefix.'/options', OptionsController::class)
             ->get('{entity}/{property}', true, 'optionsAction');
+
+        /*
+         * THE SAMMELAKTIONEN GET A MOUNT OF THEIR OWN, like everything else under the prefix —
+         * one mount binds one controller class. The segment is ADR 0012 again.
+         *
+         * `match()` AND NOT `post()`, for the reason the form states: routes within one provider
+         * are keyed by their path, so a `post()` beside a `get()` on the same path would replace
+         * it instead of adding to it. `BulkController` therefore checks the method itself and
+         * sends a GET back to the list — which is where somebody reloading after an action
+         * wanted to be anyway.
+         *
+         * `isSecure = true`: the actions write through sub-requests to `/api/delete` and
+         * `/api/multiupdate`, and both run the core's permission check against the `auth.user`
+         * that only a guarded main request sets.
+         */
+        $this->app['routeManager']
+            ->mount($this->prefix.'/bulk', BulkController::class)
+            ->match('{entity}', true, 'bulkAction');
 
         $this->app['routeManager']
             ->mount($this->prefix.'/_asset', AssetController::class)

@@ -54,6 +54,18 @@
     without JavaScript it simply does nothing, while the row boxes keep working and the bar stays
     visible with its initial text. `admin/list-select` hides the bar while nothing is ticked and
     counts what is.
+
+    THE TWO ACTIONS ARE TWO SUBMIT BUTTONS OF THAT ONE FORM (002-004-0005), which is why the
+    selection reaches both without being kept anywhere: the browser sends the ticked boxes along
+    with whichever button was pressed, and `action` says which one it was. The change controls sit
+    in a `<details>` — the collapse is the browser's own and costs no JavaScript — and the field
+    is chosen by a radio button, so every type gets the control it deserves instead of one text
+    box for all of them. Without JavaScript all of it works; what is missing is the confirmation
+    before a delete, which `admin/list-select` adds.
+
+    THE REPORT OF A FINISHED ACTION STANDS ABOVE THE BAR. `BulkController` redirects back here
+    with the action, two counts and at most a few ids, and `ListController::report()` composes the
+    sentence — the URL never carries prose.
 #}{% extends 'layout.html.twig' %}
 
 {% block bodyAttributes %} class="admin"{% endblock %}
@@ -63,6 +75,10 @@
     <h1>{{ entity }}</h1>
 
     <p class="admin-list__new"><a href="{{ newUrl }}">Neuer Datensatz</a></p>
+
+{% if report %}
+    <p class="admin-list__report{% if not report.ok %} admin-list__report--problem{% endif %}" role="status">{{ report.text }}</p>
+{% endif %}
 
 {% if queryForm %}
     <form class="admin-list__filter" method="get" action="{{ queryForm.action }}"
@@ -167,10 +183,46 @@
         </tbody>
     </table>
 {% if selection %}
-        <p class="admin-list__bulk-bar" data-admin-list-select-target="bar">
+        <div class="admin-list__bulk-bar" data-admin-list-select-target="bar">
             <span class="admin-list__bulk-count" aria-live="polite"
                   data-admin-list-select-target="count">Keine Zeile markiert</span>
-        </p>
+            <button type="submit" class="admin-list__bulk-delete"
+                    name="{{ selection.actionField }}" value="{{ selection.delete }}">Löschen</button>
+{% if selection.fields is not empty %}
+            <details class="admin-list__bulk-change">
+                <summary>Ein Feld ändern</summary>
+{% for field in selection.fields %}
+                <p class="admin-list__bulk-field">
+                    <label for="bulk-{{ field.property }}">
+                        <input type="radio" name="field" value="{{ field.property }}"> {{ field.label }}
+                    </label>
+{% if field.type == 'boolean' %}
+                    <select id="bulk-{{ field.property }}" name="value[{{ field.property }}]">
+                        <option value="true">Ja</option>
+                        <option value="false">Nein</option>
+                    </select>
+{% elseif field.type == 'select' %}
+                    <select id="bulk-{{ field.property }}" name="value[{{ field.property }}]">
+{% for option in field.options %}
+                        <option value="{{ option.value }}">{{ option.label }}</option>
+{% endfor %}
+                    </select>
+{% elseif field.type == 'integer' %}
+                    <input type="number" step="1" id="bulk-{{ field.property }}" name="value[{{ field.property }}]">
+{% elseif field.type == 'decimal' or field.type == 'float' %}
+                    <input type="number" step="any" id="bulk-{{ field.property }}" name="value[{{ field.property }}]">
+{% else %}
+                    <input type="text" id="bulk-{{ field.property }}" name="value[{{ field.property }}]"{% if field.maxlength %} maxlength="{{ field.maxlength }}"{% endif %}>
+{% endif %}
+                </p>
+{% endfor %}
+                <p class="admin-list__bulk-apply">
+                    <button type="submit" name="{{ selection.actionField }}"
+                            value="{{ selection.change }}">Auf die Markierten anwenden</button>
+                </p>
+            </details>
+{% endif %}
+        </div>
     </form>
 {% endif %}
 
