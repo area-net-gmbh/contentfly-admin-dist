@@ -289,8 +289,20 @@ final class FileController
             'token'       => $token,
             'tokenField'  => FormToken::FIELD,
             'actionField' => self::ACTION_FIELD,
-            'actions'     => array('rename' => self::RENAME, 'move' => self::MOVE, 'delete' => self::DELETE),
+            'actions'     => array(
+                'rename' => self::RENAME,
+                'move'   => self::MOVE,
+                'delete' => self::DELETE,
+                'upload' => self::UPLOAD,
+            ),
             'folderField' => self::PARAM_FOLDER,
+            /*
+             * The file input has to carry the core's own field name, and the `accept` value is
+             * whatever the project stated — empty means the template writes no attribute at all
+             * (ADR 0021).
+             */
+            'uploadField'  => self::CORE_UPLOAD_FIELD,
+            'uploadAccept' => $manager->getUploadAccept(),
             'mayWrite'    => $this->mayWrite(self::ENTITY_FILE),
             'mayDelete'   => $this->mayDelete(self::ENTITY_FILE),
             'moveTargets' => $tree === null ? null : self::moveTargets($tree),

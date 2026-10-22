@@ -96,6 +96,35 @@
 {% endif %}
 
         <section class="admin-files__list" aria-label="Dateien">
+{% if mayWrite %}
+{#
+   DIE ZONE STEHT VOR DER LISTE UND AUCH DANN, WENN DER ORDNER LEER IST. Ein leerer Ordner ist
+   gerade der Fall, in dem jemand etwas hochladen will — eine Zone, die erst mit der ersten Datei
+   erscheint, fehlt genau dann.
+
+   OHNE JAVASCRIPT IST DAS EIN GEWOEHNLICHES FORMULAR, und es funktioniert: Token, Aktion und
+   Ordner stehen als Felder darin, die Route nimmt den POST wie jeden anderen Schreibweg an und
+   antwortet mit 303. `multiple` bleibt trotzdem stehen — das Modul aus 003-002-0004 braucht es,
+   und ohne das Modul kommt bei einer Mehrfachauswahl **eine** Datei an, weil alle Teile denselben
+   Feldnamen tragen und PHP nur den letzten behaelt. Weniger als gewuenscht, aber nicht
+   stillschweigend falsch.
+
+   `accept` STEHT NUR DA, WENN DAS PROJEKT ES GESETZT HAT (ADR 0021). Ein leerer Default heisst
+   kein Attribut — und nicht `accept=""`, was jede Datei ausschliessen wuerde.
+#}
+            <form class="admin-files__upload" method="post" action="{{ rootUrl }}"
+                  enctype="multipart/form-data">
+                <input type="hidden" name="{{ tokenField }}" value="{{ token }}">
+                <input type="hidden" name="{{ actionField }}" value="{{ actions.upload }}">
+                <input type="hidden" name="{{ folderField }}" value="{{ folder ?? '' }}">
+                <label class="admin-files__upload-label" for="admin-files-upload">
+                    Dateien hierher ziehen oder auswählen
+                </label>
+                <input class="admin-files__upload-input" id="admin-files-upload" type="file"
+                       name="{{ uploadField }}" multiple{% if uploadAccept %} accept="{{ uploadAccept }}"{% endif %}>
+                <button class="admin-files__upload-button" type="submit">Hochladen</button>
+            </form>
+{% endif %}
 {% if files is empty %}
             <p class="admin-files__empty">
 {% if isRoot %}

@@ -1088,6 +1088,61 @@ li {
 }
 
 /*
+ * THE UPLOAD ZONE (story 003-002).
+ *
+ * IT HAS ITS HEIGHT BEFORE IT HAS CONTENT. `min-height` rather than padding alone, so the rows
+ * below do not move when the progress list from 003-002-0004 appears inside it — the same reason
+ * the preview cell was given its size in 003-001-0003.
+ *
+ * A DASHED OUTLINE AND NOT A BUTTON, because the whole area is the target: it has to read as a
+ * surface one can drop onto even before anything is dragged. `--admin-rule` keeps it quiet; the
+ * accent belongs to the one button inside it.
+ *
+ * IT WRAPS INSTEAD OF SCROLLING. On a narrow screen the label, the field and the button sit on
+ * their own lines — a file input is wide and cannot be shortened below its button, so a
+ * nowrap row here would push the grid open.
+ */
+.admin-files__upload {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+    min-height: 4.5rem;
+    margin: 0 0 1rem;
+    padding: 0.75rem;
+    border: 2px dashed var(--admin-rule);
+    border-radius: 4px;
+}
+
+.admin-files__upload-label {
+    flex: 1 0 100%;
+    color: var(--admin-muted);
+    font-size: 0.9375rem;
+}
+
+.admin-files__upload-input {
+    flex: 1 1 14rem;
+    min-width: 0;
+    font: inherit;
+    font-size: 0.875rem;
+}
+
+.admin-files__upload-button {
+    padding: 0.1875rem 0.5rem;
+    border: 1px solid var(--admin-accent);
+    border-radius: 3px;
+    background: var(--admin-accent);
+    color: var(--admin-accent-contrast);
+    font: inherit;
+    font-size: 0.875rem;
+    cursor: pointer;
+}
+
+.admin-files__upload-button:hover {
+    filter: brightness(var(--admin-hover-dim));
+}
+
+/*
  * THE REPORT IS ONE SENTENCE ABOUT WHAT JUST HAPPENED, in the two colours the package already
  * uses for the two outcomes — the refusal page's muted tone would make a failure look like a
  * note, and `--admin-danger` would make a success look like one too.
