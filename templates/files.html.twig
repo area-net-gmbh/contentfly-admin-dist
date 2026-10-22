@@ -18,6 +18,18 @@
     column is then left out and the file list stays (ADR 0019, additive masking). It is not an
     error state and must not look like one.
 
+    THE ROW FORMS APPEAR WITH THE RIGHTS THEY NEED (003-001-0005). `mayWrite` carries the rename
+    field and the move control, `mayDelete` the delete button; without either the row is what it
+    was before, a listing. Hiding them is tidiness — `FileController::write()` refuses the post as
+    well, which is the part that closes the data.
+
+    MOVING NEEDS THE TREE. Without the right to read folders there is no list to choose a target
+    from, so the control is absent even with a write right — the same additive masking as above.
+
+    THE DELETE BUTTON ASKS FIRST, through `data-turbo-confirm`. Turbo is already started by the
+    layout, so the confirmation needs no module of its own and no inline script; without Turbo the
+    form simply submits, which is why the server asks for the right again.
+
     THE PREVIEW IS EITHER AN IMAGE OR A LABEL, never an empty box (003-001-0004). `file.preview`
     is an address for the three types a derivative can be made from and `null` for everything
     else; `file.badge` carries the short label those show instead. A file whose preview fails to
@@ -55,6 +67,11 @@
 {% import _self as macros %}
 <main class="admin__main admin-files">
     <h1>Dateien</h1>
+
+{% if report %}
+    <p class="admin-files__report{{ report.ok ? ' admin-files__report--ok' : ' admin-files__report--problem' }}"
+       role="status">{{ report.text }}</p>
+{% endif %}
 
     <nav class="admin-files__trail" aria-label="Ordnerpfad">
         <a class="admin-files__trail-link{{ isRoot ? ' admin-files__trail-link--current' : '' }}"
@@ -95,6 +112,9 @@
                         <th scope="col" class="admin-files__cell">Name</th>
                         <th scope="col" class="admin-files__cell">Typ</th>
                         <th scope="col" class="admin-files__cell admin-files__cell--size">Größe</th>
+{% if mayWrite or mayDelete %}
+                        <th scope="col" class="admin-files__cell admin-files__cell--actions">Aktionen</th>
+{% endif %}
                     </tr>
                 </thead>
                 <tbody>
@@ -114,6 +134,49 @@
                         <td class="admin-files__cell">{{ file.name }}</td>
                         <td class="admin-files__cell">{{ file.type }}</td>
                         <td class="admin-files__cell admin-files__cell--size">{{ file.size }}</td>
+{% if mayWrite or mayDelete %}
+                        <td class="admin-files__cell admin-files__cell--actions">
+{% if mayWrite %}
+                            <form class="admin-files__action" method="post" action="{{ rootUrl }}">
+                                <input type="hidden" name="{{ tokenField }}" value="{{ token }}">
+                                <input type="hidden" name="{{ actionField }}" value="{{ actions.rename }}">
+                                <input type="hidden" name="id" value="{{ file.id }}">
+                                <input type="hidden" name="{{ folderField }}" value="{{ folder ?? '' }}">
+                                <label class="admin-files__action-label" for="name-{{ file.id }}">Name</label>
+                                <input class="admin-files__action-input" id="name-{{ file.id }}"
+                                       type="text" name="name" value="{{ file.name }}" required>
+                                <button class="admin-files__action-button" type="submit">Umbenennen</button>
+                            </form>
+{% if moveTargets is not null %}
+                            <form class="admin-files__action" method="post" action="{{ rootUrl }}">
+                                <input type="hidden" name="{{ tokenField }}" value="{{ token }}">
+                                <input type="hidden" name="{{ actionField }}" value="{{ actions.move }}">
+                                <input type="hidden" name="id" value="{{ file.id }}">
+                                <input type="hidden" name="{{ folderField }}" value="{{ folder ?? '' }}">
+                                <label class="admin-files__action-label" for="target-{{ file.id }}">Ordner</label>
+                                <select class="admin-files__action-select" id="target-{{ file.id }}" name="target">
+                                    <option value=""{{ folder is null ? ' selected' : '' }}>(ausserhalb der Ordner)</option>
+{% for target in moveTargets %}
+                                    <option value="{{ target.id }}"{{ target.id == folder ? ' selected' : '' }}>{{ target.label }}</option>
+{% endfor %}
+                                </select>
+                                <button class="admin-files__action-button" type="submit">Verschieben</button>
+                            </form>
+{% endif %}
+{% endif %}
+{% if mayDelete %}
+                            <form class="admin-files__action" method="post" action="{{ rootUrl }}"
+                                  data-turbo-confirm="„{{ file.name }}“ wirklich löschen? Das lässt sich nicht zurücknehmen.">
+                                <input type="hidden" name="{{ tokenField }}" value="{{ token }}">
+                                <input type="hidden" name="{{ actionField }}" value="{{ actions.delete }}">
+                                <input type="hidden" name="id" value="{{ file.id }}">
+                                <input type="hidden" name="{{ folderField }}" value="{{ folder ?? '' }}">
+                                <button class="admin-files__action-button admin-files__action-button--danger"
+                                        type="submit">Löschen</button>
+                            </form>
+{% endif %}
+                        </td>
+{% endif %}
                     </tr>
 {% endfor %}
                 </tbody>

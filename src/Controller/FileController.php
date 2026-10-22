@@ -6,11 +6,14 @@ namespace Areanet\ContentflyAdmin\Controller;
 
 use Areanet\ContentflyAdmin\AdminManager;
 use Areanet\ContentflyAdmin\Asset\Importmap;
+use Areanet\ContentflyAdmin\Auth\FormToken;
+use Areanet\ContentflyAdmin\Schema\Envelope;
 use Areanet\ContentflyAdmin\View\MenuBuilder;
 use Areanet\ContentflyAdmin\View\TemplateRenderer;
 use Areanet\PIM\Classes\Api;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\HttpKernelInterface;
 
 /**
  * The file manager: folders, files, preview, and the three write paths.
@@ -75,6 +78,24 @@ final class FileController
     /** How many files one page of the listing shows. */
     public const ITEMS_PER_PAGE = 50;
 
+    /** The form field that names the action a POST asks for. */
+    public const ACTION_FIELD = 'action';
+
+    /** The three write actions this view offers. Files only — folders are navigation (ADR 0020). */
+    public const RENAME = 'rename';
+    public const MOVE   = 'move';
+    public const DELETE = 'delete';
+
+    /**
+     * The parameter names the report owns.
+     *
+     * Stripped out of a carried folder address so a stale copy cannot describe an action that did
+     * not happen in this request — the same rule `BulkController` follows.
+     *
+     * @var list<string>
+     */
+    public const REPORT_KEYS = array('done', 'code');
+
     /** What a cell shows when the value is null or empty — never an empty-looking table. */
     private const EMPTY_CELL = '—';
 
@@ -133,6 +154,18 @@ final class FileController
 
         if (!$this->mayRead(self::ENTITY_FILE)) {
             return $this->accessDeniedPage(self::ENTITY_FILE);
+        }
+
+        /*
+         * A POST IS AN ACTION, A GET IS THE PAGE. The mount is `match()` for exactly this reason:
+         * a `post()` written beside a `get()` on the same path would have replaced it instead of
+         * adding to it, so the method is decided here rather than by the router.
+         *
+         * A GET is never an error on this route — someone reloading after an action or typing the
+         * address wants the listing, which is what follows.
+         */
+        if ($request->isMethod('POST')) {
+            return $this->write($request, $manager->getPrefix().'/files/');
         }
 
         $api = new Api($this->app, $request);
@@ -203,6 +236,8 @@ final class FileController
             }
         }
 
+        $token = FormToken::issue($request);
+
         $html = $this->app[TemplateRenderer::CONTAINER_KEY]->render('files.html.twig', array(
             'title'      => 'Dateien — '.$manager->getTitle(),
             'stylesheet' => $manager->assetUrl('admin.css'),
@@ -215,6 +250,16 @@ final class FileController
             'isRoot'     => $folder === null,
             'files'       => $files,
             'controllers' => $controllers,
+            'report'      => self::report($request),
+            'token'       => $token,
+            'tokenField'  => FormToken::FIELD,
+            'actionField' => self::ACTION_FIELD,
+            'actions'     => array('rename' => self::RENAME, 'move' => self::MOVE, 'delete' => self::DELETE),
+            'folderField' => self::PARAM_FOLDER,
+            'mayWrite'    => $this->mayWrite(self::ENTITY_FILE),
+            'mayDelete'   => $this->mayDelete(self::ENTITY_FILE),
+            'moveTargets' => $tree === null ? null : self::moveTargets($tree),
+            'folder'      => $folder,
             'pagination' => array(
                 'page'    => $page,
                 'pages'   => $pages,
@@ -224,7 +269,234 @@ final class FileController
             ),
         ));
 
-        return new Response($html, 200, array('Content-Type' => 'text/html; charset=UTF-8'));
+        $response = new Response($html, 200, array('Content-Type' => 'text/html; charset=UTF-8'));
+
+        /*
+         * The token's cookie is set once per session, exactly as the list and the form view set
+         * it: the row forms post back to this route, and without the cookie `FormToken::verify()`
+         * would have nothing to compare the field against.
+         */
+        if (!FormToken::isIssued($request, $token)) {
+            $response->headers->setCookie(FormToken::cookie($request, $token, $manager->getPrefix()));
+        }
+
+        return $response;
+    }
+
+    /**
+     * Renaming, moving and deleting one file.
+     *
+     * FILES ONLY, NEVER FOLDERS (ADR 0020). The tree is navigation in this story; deleting a
+     * folder that still holds files is a decision of its own — refuse it, or take the contents
+     * with it — and this story does not carry it.
+     *
+     * IT REPORTS RATHER THAN 403s, the stance `BulkController` takes for the same situation: the
+     * read permission above already answered whether these files are the editor's business, and
+     * a missing write or delete right is an ordinary outcome of a form post. A blank 403 would
+     * leave the editor on a page they have to navigate away from.
+     *
+     * THE RETURN ADDRESS IS WHERE THE EDITOR CAME FROM, carried as a field rather than taken from
+     * the referrer. It is deliberately the *origin* folder and not the move target: after moving a
+     * file out of a folder the editor is still working in that folder, and the report says where
+     * the file went.
+     */
+    private function write(Request $request, string $base): Response
+    {
+        $from = $request->request->get(self::PARAM_FOLDER);
+        $from = is_string($from) && $from !== '' ? $from : null;
+
+        if (!FormToken::verify($request)) {
+            return self::back($base, $from, array('done' => 'expired'));
+        }
+
+        $id = $request->request->get('id');
+
+        if (!is_string($id) || $id === '') {
+            return self::back($base, $from, array('done' => 'missing'));
+        }
+
+        $action = $request->request->get(self::ACTION_FIELD);
+
+        if ($action === self::DELETE) {
+            if (!$this->mayDelete(self::ENTITY_FILE)) {
+                return self::back($base, $from, array('done' => 'forbidden'));
+            }
+
+            $envelope = $this->call($request, '/api/delete', array(
+                'entity' => self::ENTITY_FILE,
+                'id'     => $id,
+            ));
+
+            return self::back($base, $from, self::outcome(self::DELETE, $envelope));
+        }
+
+        if ($action === self::RENAME || $action === self::MOVE) {
+            if (!$this->mayWrite(self::ENTITY_FILE)) {
+                return self::back($base, $from, array('done' => 'forbidden'));
+            }
+
+            if ($action === self::RENAME) {
+                $name = $request->request->get('name');
+
+                if (!is_string($name) || trim($name) === '') {
+                    return self::back($base, $from, array('done' => 'name'));
+                }
+
+                $data = array('name' => trim($name));
+            } else {
+                $target = $request->request->get('target');
+
+                /*
+                 * THE EMPTY TARGET IS THE ROOT, and it has to travel as `null` rather than as the
+                 * `-1` the *filter* uses: `-1` is the core's convention for "where the relation is
+                 * unset" in a `where`, not a value one can write into the relation.
+                 */
+                $data = array('folder' => is_string($target) && $target !== '' ? $target : null);
+            }
+
+            $envelope = $this->call($request, '/api/update', array(
+                'entity' => self::ENTITY_FILE,
+                'id'     => $id,
+                'data'   => $data,
+            ));
+
+            return self::back($base, $from, self::outcome($action, $envelope));
+        }
+
+        return self::back($base, $from, array('done' => 'unknown'));
+    }
+
+    /**
+     * One sub-request to the core, with its answer read as an envelope (ADR 0014).
+     *
+     * THE PAYLOAD GOES IN THE REQUEST BAG and the server parameters are carried over, so the
+     * guarded main request's `auth.user` is the one the core checks its own per-record permission
+     * against — the same shape the form and the bulk actions use.
+     *
+     * @param array<string,mixed> $payload
+     *
+     * @return array{ok: bool, readable: bool, data: mixed, error: array<string,mixed>|null}
+     */
+    private function call(Request $request, string $endpoint, array $payload): array
+    {
+        $sub = Request::create($endpoint, 'POST', $payload, array(), array(), $request->server->all());
+
+        $response = $this->app->handle($sub, HttpKernelInterface::SUB_REQUEST);
+
+        return Envelope::read($response->getContent(), $response->getStatusCode());
+    }
+
+    /**
+     * What the report carries after the core has answered.
+     *
+     * A FAILURE KEEPS THE CORE'S CODE rather than being flattened into "did not work". The code is
+     * what distinguishes a name that is already taken from a record somebody else deleted in the
+     * meantime, and the editor can act on the difference.
+     *
+     * @param array{ok: bool, readable: bool, data: mixed, error: array<string,mixed>|null} $envelope
+     *
+     * @return array<string,string>
+     */
+    private static function outcome(string $action, array $envelope): array
+    {
+        if ($envelope['ok']) {
+            return array('done' => $action);
+        }
+
+        $code = is_array($envelope['error']) ? ($envelope['error']['code'] ?? null) : null;
+
+        return array('done' => 'failed', 'code' => is_string($code) ? $code : '');
+    }
+
+    /**
+     * Back to the folder the action came from, as a redirect.
+     *
+     * 303 AND NOT 302, so a reload of the destination is a GET and cannot repeat the action.
+     */
+    private static function back(string $base, ?string $folder, array $report): Response
+    {
+        $params = $report;
+
+        if ($folder !== null) {
+            $params[self::PARAM_FOLDER] = $folder;
+        }
+
+        return new Response('', 303, array(
+            'Location' => $params === array() ? $base : $base.'?'.http_build_query($params),
+        ));
+    }
+
+    /**
+     * The sentence the page shows about the action that just ran, or `null` when none did.
+     *
+     * @return array{ok: bool, text: string}|null
+     */
+    private static function report(Request $request): ?array
+    {
+        $done = $request->query->get('done');
+
+        if (!is_string($done) || $done === '') {
+            return null;
+        }
+
+        $refusals = array(
+            'expired'   => 'Die Aktion ist abgelaufen oder wurde nicht von dieser Seite abgeschickt. Bitte erneut absenden.',
+            'missing'   => 'Es war keine Datei angegeben — es wurde nichts geändert.',
+            'forbidden' => 'Für diese Aktion fehlt dir die Berechtigung — es wurde nichts geändert.',
+            'name'      => 'Ohne Namen lässt sich die Datei nicht umbenennen — es wurde nichts geändert.',
+            'unknown'   => 'Die Aktion ist unbekannt — es wurde nichts geändert.',
+        );
+
+        if (isset($refusals[$done])) {
+            return array('ok' => false, 'text' => $refusals[$done]);
+        }
+
+        if ($done === 'failed') {
+            $code = $request->query->get('code');
+
+            return array(
+                'ok'   => false,
+                'text' => 'Die Aktion ist fehlgeschlagen'
+                    .(is_string($code) && $code !== '' ? ' ('.$code.')' : '').' — es wurde nichts geändert.',
+            );
+        }
+
+        $erfolge = array(
+            self::RENAME => 'Die Datei ist umbenannt.',
+            self::MOVE   => 'Die Datei ist verschoben.',
+            self::DELETE => 'Die Datei ist gelöscht.',
+        );
+
+        return isset($erfolge[$done]) ? array('ok' => true, 'text' => $erfolge[$done]) : null;
+    }
+
+    /**
+     * The folders a file can be moved into, flattened into one selectable list.
+     *
+     * A FLAT LIST WITH INDENTED LABELS, not a nested control: a `select` cannot nest, and the
+     * depth is what tells two folders of the same name apart. The root is offered as an empty
+     * value so a file can be moved out of every folder.
+     *
+     * @return list<array{id: string, label: string}>
+     */
+    private static function moveTargets(array $nodes, int $depth = 0): array
+    {
+        $targets = array();
+
+        foreach ($nodes as $node) {
+            $title = ($node['title'] ?? '') === '' ? self::EMPTY_CELL : (string) $node['title'];
+
+            $targets[] = array(
+                'id'    => (string) ($node['id'] ?? ''),
+                'label' => str_repeat('— ', $depth).$title,
+            );
+
+            foreach (self::moveTargets($node['childs'] ?? array(), $depth + 1) as $child) {
+                $targets[] = $child;
+            }
+        }
+
+        return $targets;
     }
 
     /**

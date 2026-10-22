@@ -1014,3 +1014,96 @@ li {
 .admin-files__page-state {
     color: var(--admin-muted);
 }
+
+/*
+ * THE ROW ACTIONS (story 003-001-0005).
+ *
+ * THREE SMALL FORMS, NOT ONE. Renaming, moving and deleting are three intentions, and one form
+ * with three buttons would have to carry which was pressed — a hidden field decided by
+ * JavaScript, or a `formaction` per button. Three forms say it in the markup, and each posts only
+ * what its own action needs.
+ *
+ * THEY STACK ON A NARROW SCREEN AND SIT IN A ROW ON A WIDE ONE, which is what `flex-wrap` does
+ * without a media query here: the cell is as wide as the table allows and the forms break when
+ * they no longer fit.
+ */
+.admin-files__cell--actions {
+    max-width: none;
+    overflow: visible;
+    white-space: normal;
+}
+
+.admin-files__action {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    align-items: center;
+    margin: 0 0.5rem 0.25rem 0;
+}
+
+/*
+ * THE LABELS ARE FOR SCREEN READERS, not for the eye: the column header already says what the
+ * row is, and three visible labels per row would be more text than the table holds. Clipped
+ * rather than `display: none`, which would take them out of the accessibility tree as well.
+ */
+.admin-files__action-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+.admin-files__action-input,
+.admin-files__action-select {
+    max-width: 11rem;
+    padding: 0.1875rem 0.375rem;
+    border: 1px solid var(--admin-rule);
+    border-radius: 3px;
+    font: inherit;
+    font-size: 0.875rem;
+}
+
+.admin-files__action-button {
+    padding: 0.1875rem 0.5rem;
+    border: 1px solid var(--admin-accent);
+    border-radius: 3px;
+    background: var(--admin-accent);
+    color: var(--admin-accent-contrast);
+    font: inherit;
+    font-size: 0.875rem;
+    cursor: pointer;
+}
+
+.admin-files__action-button:hover {
+    filter: brightness(var(--admin-hover-dim));
+}
+
+.admin-files__action-button--danger {
+    border-color: var(--admin-danger);
+    background: var(--admin-danger);
+}
+
+/*
+ * THE REPORT IS ONE SENTENCE ABOUT WHAT JUST HAPPENED, in the two colours the package already
+ * uses for the two outcomes — the refusal page's muted tone would make a failure look like a
+ * note, and `--admin-danger` would make a success look like one too.
+ */
+.admin-files__report {
+    max-width: 48rem;
+    margin: 0.5rem 0 0;
+    padding: 0.5rem 0.75rem;
+    border-radius: 3px;
+}
+
+.admin-files__report--ok {
+    background: var(--admin-rule);
+}
+
+.admin-files__report--problem {
+    background: var(--admin-danger-surface);
+    color: var(--admin-danger-text);
+}
