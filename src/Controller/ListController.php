@@ -43,6 +43,7 @@ use Symfony\Component\HttpFoundation\Response;
 final class ListController
 {
     use GuardsCoreVersion;
+    use GuardsPermissions;
 
     /**
      * How many records one page shows.
@@ -101,6 +102,10 @@ final class ListController
 
         if (!in_array($name, $manager->getEntities(), true)) {
             return new Response('', 404);
+        }
+
+        if (!$this->mayRead($name)) {
+            return $this->accessDeniedPage($name);
         }
 
         $schema = $this->app[SchemaClient::CONTAINER_KEY]->getSchema();
@@ -673,6 +678,7 @@ final class ListController
             'field'   => 'Das zu ändernde Feld gibt es an dieser Entität nicht oder es ist schreibgeschützt.',
             'value'   => 'Zu dem gewählten Feld war kein Wert angegeben.',
             'unknown' => 'Die Aktion ist unbekannt — es wurde nichts geändert.',
+            'forbidden' => 'Für diese Aktion fehlt dir die Berechtigung — es wurde nichts geändert.',
         );
 
         if (isset($refusals[$bulk])) {

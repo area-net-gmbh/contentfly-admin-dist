@@ -830,3 +830,17 @@ li {
 .admin-list__bulk-apply {
     margin: 0.75rem 0 0;
 }
+
+/*
+ * THE REFUSAL PAGE (story 002-009).
+ *
+ * It borrows `admin__main` for its frame and adds nothing but the sentence, because it is a page
+ * of the admin and not a warning banner: the editor is signed in, the menu beside it works, and
+ * the missing permission is a fact about one entity rather than a fault to alarm anybody with.
+ * The muted colour is deliberate over `--admin-danger` for the same reason.
+ */
+.admin-refused__message {
+    max-width: 48rem;
+    margin: 0.5rem 0 0;
+    color: var(--admin-muted);
+}

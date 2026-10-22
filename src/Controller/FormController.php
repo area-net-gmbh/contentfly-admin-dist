@@ -58,6 +58,7 @@ use Symfony\Component\HttpFoundation\Response;
 final class FormController
 {
     use GuardsCoreVersion;
+    use GuardsPermissions;
 
 
     /**
@@ -183,6 +184,10 @@ final class FormController
 
         if (!in_array($name, $manager->getEntities(), true)) {
             return new Response('', 404);
+        }
+
+        if (!$this->mayRead($name)) {
+            return $this->accessDeniedPage($name);
         }
 
         $schema = $this->app[SchemaClient::CONTAINER_KEY]->getSchema();

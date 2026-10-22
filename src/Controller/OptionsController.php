@@ -38,6 +38,7 @@ use Symfony\Component\HttpFoundation\Response;
 final class OptionsController
 {
     use GuardsCoreVersion;
+    use GuardsPermissions;
 
     /** @var \Areanet\PIM\Classes\Kernel\ApplicationInterface */
     private $app;
@@ -65,6 +66,10 @@ final class OptionsController
 
         if (!in_array($name, $manager->getEntities(), true)) {
             return new JsonResponse(array(), 404);
+        }
+
+        if (!$this->mayRead($name)) {
+            return self::accessDeniedBare();
         }
 
         $widget = self::widgetOf($this->app[EntityView::CONTAINER_KEY]->formFields($name), $property);

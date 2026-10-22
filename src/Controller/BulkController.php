@@ -45,6 +45,7 @@ use Symfony\Component\HttpKernel\HttpKernelInterface;
 final class BulkController
 {
     use GuardsCoreVersion;
+    use GuardsPermissions;
 
     /** The field that says which action was pressed. */
     public const ACTION_FIELD = 'action';
@@ -112,6 +113,10 @@ final class BulkController
             return new Response('', 404);
         }
 
+        if (!$this->mayRead($name)) {
+            return self::accessDeniedBare();
+        }
+
         $list = $manager->getPrefix().'/list/'.MenuBuilder::entityToUrl($name);
 
         /*
@@ -134,11 +139,31 @@ final class BulkController
 
         $action = $request->request->get(self::ACTION_FIELD);
 
+        /*
+         * THE ACTION'S OWN RIGHT, AND IT REPORTS RATHER THAN 403s. The read permission above
+         * already answered whether this entity is the editor's business at all; this answers
+         * whether *this action* is, and a missing delete right is an ordinary outcome of a form
+         * post, not a broken request. So it takes the path the controller's other refusals take
+         * — back to the list with a code `ListController::report()` turns into a sentence —
+         * instead of a blank 403 the editor would have to navigate away from.
+         *
+         * The core checks the same right per record on every call (`Api.php:120-131`, `:605-615`).
+         * Checking it here as well is not duplication: it keeps a selection of twenty records
+         * from going out one request at a time only to be refused twenty times.
+         */
         if ($action === self::DELETE) {
+            if (!$this->mayDelete($name)) {
+                return self::back($list, $request, array('bulk' => 'forbidden'));
+            }
+
             return self::back($list, $request, $this->delete($request, $name, $ids));
         }
 
         if ($action === self::CHANGE) {
+            if (!$this->mayWrite($name)) {
+                return self::back($list, $request, array('bulk' => 'forbidden'));
+            }
+
             return self::back($list, $request, $this->change($request, $name, $ids));
         }
 

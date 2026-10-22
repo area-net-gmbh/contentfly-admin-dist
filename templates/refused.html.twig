@@ -1,0 +1,19 @@
+{#
+    The page a route shows when the editor may not read what they asked for (ADR 0019).
+
+    IT EXTENDS THE LAYOUT ON PURPOSE. The editor is signed in and the layout works, so this is
+    a page of the admin and not a failure of it — unlike `GuardsCoreVersion::refusal()`, which
+    renders without Twig because the setup the layout depends on is what broke there.
+
+    THE MENU COMES ALONG, and it now lists only readable entities. A refusal that also shows
+    where the editor *may* go is a refusal rather than a dead end.
+#}{% extends 'layout.html.twig' %}
+
+{% block bodyAttributes %} class="admin"{% endblock %}
+
+{% block content %}
+<main class="admin__main admin-refused">
+    <h1>{{ heading }}</h1>
+    <p class="admin-refused__message" role="status">{{ message }}</p>
+</main>
+{% endblock %}
