@@ -92,6 +92,23 @@ final class EntityView
         'mimetypes',
     );
 
+    /**
+     * The field types the core's full-text search actually looks at.
+     *
+     * MIRRORS `Api.php:1442` AND NOTHING ELSE. The search is the core's, so what it covers is the
+     * core's statement, not this package's: it builds one `OR` over every property of these types
+     * that is not `secret`, plus an exact match on the id. Repeating the list here is the only way
+     * to answer "can this entity be searched at all" before offering a box that could not work.
+     *
+     * @var list<string>
+     */
+    public const FULLTEXT_TYPES = array(
+        'string',
+        'text',
+        'textarea',
+        'rte',
+    );
+
     private SchemaClient $schemaClient;
 
     private ColumnBuilder $columnBuilder;
@@ -189,6 +206,39 @@ final class EntityView
         }
 
         return $filters;
+    }
+
+    /**
+     * Whether the entity has anything the core's full-text search would look at.
+     *
+     * OFFERED ONLY WHERE IT CAN WORK. `where['fulltext']` searches the text properties of the
+     * entity and, besides that, matches an exactly given id (`Api.php:1444`). On an entity without
+     * a single text property the box would therefore be an id lookup wearing the label "search" —
+     * it would answer "nothing found" for every word anyone could reasonably type. The same
+     * stance `RelationOptions` takes with a target it cannot read: show nothing rather than offer
+     * something that cannot deliver.
+     *
+     * A `secret` property does not count, because the core skips it inside the search as well
+     * (`Api.php:1459`) — counting it would be how an entity made entirely of secrets gets a
+     * search box.
+     *
+     * @param string $entity Entity name as the schema spells it
+     */
+    public function isSearchable(string $entity): bool
+    {
+        $properties = $this->schemaClient->getSchema()[$entity]['properties'] ?? array();
+
+        foreach ($properties as $meta) {
+            if (!is_array($meta) || ($meta['secret'] ?? false) === true) {
+                continue;
+            }
+
+            if (in_array($meta['type'] ?? null, self::FULLTEXT_TYPES, true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

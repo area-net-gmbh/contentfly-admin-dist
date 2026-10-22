@@ -122,7 +122,9 @@ final class ListController
 
         $filterDefs = $this->app[EntityView::CONTAINER_KEY]->listFilters($name);
         $selected   = self::selectedFilters($request, $filterDefs);
-        $where      = self::where($selected, $filterDefs);
+        $searchable = $this->app[EntityView::CONTAINER_KEY]->isSearchable($name);
+        $term       = $searchable ? self::searchTerm($request) : null;
+        $where      = self::where($selected, $term);
 
         $result = (new Api($this->app, $request))->getList(
             $name,
@@ -169,8 +171,25 @@ final class ListController
             $query['filter'] = $selected;
         }
 
+        /* The search term travels with the filter, for the same reason and in the same place. */
+        if ($term !== null) {
+            $query['q'] = $term;
+        }
+
         /* `dir` only says something next to a `sort`; on its own it would be noise in the URL. */
         $order = $query + array('sort' => $sort, 'dir' => $sort === null ? null : strtolower($direction));
+
+        $queryForm = $this->queryForm($filterDefs, $selected, $term, $searchable, $base, $query, $sort, $direction, $request);
+
+        /*
+         * THE SEARCH BOX IS THE ONLY REASON THIS PAGE NEEDS A MODULE, so it is asked for only
+         * where there is one — the same per-page decision the form view makes in
+         * `FormController::controllers()`. Without the module the box stays a plain text field in
+         * a plain form and searching costs one press of the return key.
+         */
+        $controllers = $queryForm !== null && $queryForm['search'] !== null
+            ? array('admin-list-search' => 'admin/list-search')
+            : array();
 
         $html = $this->app[TemplateRenderer::CONTAINER_KEY]->render('list.html.twig', array(
             'title'      => $name.' — '.$manager->getTitle(),
@@ -182,7 +201,8 @@ final class ListController
             'columns'    => self::sortableColumns($columns, $base, $query, $sort, $direction, $page),
             'rows'       => self::rows($records, $columns, $formBase),
             'newUrl'     => $formBase,
-            'filterForm' => $this->filterForm($filterDefs, $selected, $base, $query, $sort, $direction, $request),
+            'queryForm'   => $queryForm,
+            'controllers' => $controllers,
             'pagination' => array(
                 'page'    => $page,
                 'pages'   => $pages,
@@ -336,31 +356,60 @@ final class ListController
     }
 
     /**
-     * The selected filters as `Api::getList()` takes them, or `null` when none are set.
+     * The search term from the URL, or `null` when nothing was asked.
+     *
+     * TRIMMED, AND A BLANK TERM IS NOTHING. `where['fulltext']` would otherwise become `%  %`
+     * and match every record that contains two spaces — an answer that looks like a search
+     * result and is not one. The core escapes `%`, `_` and `\` in the term itself
+     * (`Api.php:1455`), so nothing else has to be done to it here.
+     */
+    private static function searchTerm(Request $request): ?string
+    {
+        $requested = $request->query->get('q');
+
+        if (!is_string($requested)) {
+            return null;
+        }
+
+        $requested = trim($requested);
+
+        return $requested === '' ? null : $requested;
+    }
+
+    /**
+     * Filters and search term as `Api::getList()` takes them, or `null` when neither is set.
      *
      * `null` AND NOT AN EMPTY ARRAY, because `getList()` guards its whole `where` block with
      * `if($where && …)` (`Api.php:1335`) — an empty array would take the same branch as `null`
      * today, but saying `null` keeps the call identical to the one this list made before filters
      * existed, so an unfiltered list cannot change behaviour because of this feature.
      *
-     * There is no conversion left to do here: `selectedFilters()` has already put every value
-     * into the form its type needs. This method exists to keep that statement in one place —
-     * the shape of the query belongs to the controller, not to the parameter reader.
+     * THE TERM GOES IN UNDER `fulltext`, WHICH IS WHY NO FILTER MAY BE CALLED THAT. The core
+     * reads that key as its search (`Api.php:1440`) and not as a field name, so a filterable
+     * property of the same name would silently take the search's place —
+     * `EntityView::RESERVED_WHERE_KEYS` is what keeps the two apart, and this is the line that
+     * depends on it.
      *
-     * @param array<string,string>                                                                                $selected
-     * @param list<array{property: string, label: string, type: string, target: string|null, group: string|null}> $filterDefs
+     * @param array<string,string> $selected
      *
      * @return array<string,string>|null
      */
-    private static function where(array $selected, array $filterDefs): ?array
+    private static function where(array $selected, ?string $term): ?array
     {
-        unset($filterDefs);
+        if ($term !== null) {
+            $selected['fulltext'] = $term;
+        }
 
         return $selected === array() ? null : $selected;
     }
 
     /**
-     * Everything the filter bar needs to render itself, or `null` when this entity offers none.
+     * Everything the query bar needs to render itself, or `null` when this entity offers nothing.
+     *
+     * SEARCH AND FILTERS ARE ONE FORM, and that is what makes them combine. Two forms would each
+     * have to carry the other's state as hidden fields, and the one that was submitted would
+     * decide whose state is a keystroke out of date. In one form the browser sends both, every
+     * time, and `where` gets them together (ADR 0018 §1 and §2).
      *
      * THE FORM DELIBERATELY DOES NOT CARRY `page`. Sorting and language survive a filter change
      * as hidden fields, because they describe how the list is shown; the page number describes
@@ -377,18 +426,20 @@ final class ListController
      * @param array<string,string>                                                                                $selected
      * @param array<string,string|array<string,string>|null>                                                      $query
      *
-     * @return array{action: string, hidden: array<string,string>, fields: list<array<string,mixed>>, active: bool, resetUrl: string|null, unsetValue: string}|null
+     * @return array{action: string, hidden: array<string,string>, fields: list<array<string,mixed>>, search: string|null, active: bool, resetUrl: string|null, unsetValue: string}|null
      */
-    private function filterForm(
+    private function queryForm(
         array $filterDefs,
         array $selected,
+        ?string $term,
+        bool $searchable,
         string $base,
         array $query,
         ?string $sort,
         string $direction,
         Request $request
     ): ?array {
-        if ($filterDefs === array()) {
+        if ($filterDefs === array() && !$searchable) {
             return null;
         }
 
@@ -423,7 +474,7 @@ final class ListController
             );
         }
 
-        if ($fields === array()) {
+        if ($fields === array() && !$searchable) {
             return null;
         }
 
@@ -438,12 +489,15 @@ final class ListController
             }
         );
 
+        $set = $selected !== array() || $term !== null;
+
         return array(
             'action'     => $base,
             'hidden'     => $hidden,
             'fields'     => $fields,
-            'active'     => $selected !== array(),
-            'resetUrl'   => $selected === array() ? null : self::url($base, $hidden),
+            'search'     => $searchable ? (string) $term : null,
+            'active'     => $set,
+            'resetUrl'   => $set ? self::url($base, $hidden) : null,
             'unsetValue' => self::RELATION_UNSET,
         );
     }

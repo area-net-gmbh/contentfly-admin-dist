@@ -33,8 +33,14 @@
 
     IT IS A PLAIN GET FORM. The filter travels in the query string like the sort order does, so
     Turbo navigates the submit by itself and a filtered list stays a sendable address (ADR 0018
-    §2). `page` is deliberately not among the hidden fields — `ListController::filterForm()`
+    §2). `page` is deliberately not among the hidden fields — `ListController::queryForm()`
     explains why.
+
+    SEARCH AND FILTERS SHARE THAT ONE FORM (002-004-0003), so the browser always sends both and
+    they narrow each other without either having to carry the other as a hidden field. The search
+    box is `data-turbo-permanent` and the form `data-turbo-action="replace"`: the box survives the
+    visit it triggers, with focus and caret, and typing does not fill the browser history. Both
+    belong to `admin/list-search`, which is declared only on a page that actually has a box.
 #}{% extends 'layout.html.twig' %}
 
 {% block bodyAttributes %} class="admin"{% endblock %}
@@ -45,12 +51,21 @@
 
     <p class="admin-list__new"><a href="{{ newUrl }}">Neuer Datensatz</a></p>
 
-{% if filterForm %}
-    <form class="admin-list__filter" method="get" action="{{ filterForm.action }}">
-{% for name, value in filterForm.hidden %}
+{% if queryForm %}
+    <form class="admin-list__filter" method="get" action="{{ queryForm.action }}"
+          data-turbo-action="replace"{% if queryForm.search is not null %} data-controller="admin-list-search"{% endif %}>
+{% for name, value in queryForm.hidden %}
         <input type="hidden" name="{{ name }}" value="{{ value }}">
 {% endfor %}
-{% for field in filterForm.fields %}
+{% if queryForm.search is not null %}
+        <p class="admin-list__filter-field">
+            <label for="list-search">Suche</label>
+            <input type="search" id="list-search" name="q" value="{{ queryForm.search }}"
+                   autocomplete="off" data-turbo-permanent
+                   data-admin-list-search-target="box">
+        </p>
+{% endif %}
+{% for field in queryForm.fields %}
         <p class="admin-list__filter-field">
             <label for="filter-{{ field.property }}">{{ field.label }}</label>
 {% if field.type == 'integer' %}
@@ -64,7 +79,7 @@
 {% else %}
             <select id="filter-{{ field.property }}" name="filter[{{ field.property }}]">
                 <option value="">Alle</option>
-                <option value="{{ filterForm.unsetValue }}"{{ field.value == filterForm.unsetValue ? ' selected' : '' }}>Nicht gesetzt</option>
+                <option value="{{ queryForm.unsetValue }}"{{ field.value == queryForm.unsetValue ? ' selected' : '' }}>Nicht gesetzt</option>
 {% for option in field.options %}
                 <option value="{{ option.value }}"{{ field.value == option.value ? ' selected' : '' }}>{{ option.label }}</option>
 {% endfor %}
@@ -76,17 +91,17 @@
         </p>
 {% endfor %}
         <p class="admin-list__filter-actions">
-            <button type="submit">Filtern</button>
-{% if filterForm.resetUrl %}
-            <a class="admin-list__filter-reset" href="{{ filterForm.resetUrl }}">Filter aufheben</a>
+            <button type="submit">Anwenden</button>
+{% if queryForm.resetUrl %}
+            <a class="admin-list__filter-reset" href="{{ queryForm.resetUrl }}">Zurücksetzen</a>
 {% endif %}
         </p>
     </form>
 {% endif %}
 
 {% if rows is empty %}
-{% if filterForm and filterForm.active %}
-    <p class="admin__hint">Kein Datensatz passt zu diesem Filter.</p>
+{% if queryForm and queryForm.active %}
+    <p class="admin__hint">Kein Datensatz passt zu dieser Einschränkung.</p>
 {% else %}
     <p class="admin__hint">Für diese Entität gibt es noch keine Datensätze.</p>
 {% endif %}
