@@ -29,15 +29,18 @@ use Areanet\PIM\Classes\Kernel\ApplicationInterface;
  * `$app['schema']` through `extend()` would not be honoured here. Nothing in the tree does that
  * today; if something starts to, this client is the place to change, not the caller.
  *
- * NO PERMISSIONS VIEW — AND THAT IS NOT AN OVERSIGHT. `/api/schema` serves
+ * NO PERMISSIONS VIEW HERE — IT IS `Auth\PermissionView`'S. `/api/schema` serves
  * `Api::getExtendedSchema()`, which carries each entity's read/write/delete flags for the signed-in
- * editor. It cannot be called here: it dereferences `$app['auth.user']->getGroup()` without a
- * guard while that key defaults to `null`, and the `getPermissions()` it uses passes the same
- * `null` into `Permission::isReadable(User $user, …)`, whose parameter is typed and not nullable.
- * The admin has no signed-in editor yet — its route is not secured and nothing sets `auth.user`.
- * The permissions view therefore arrives with the login, in epic 002. What this client returns is
- * the plain schema, in which `Api::getSchema()` reports every permission as `0`, because it guards
- * the same call where `getExtendedSchema()` does not.
+ * editor. That call stays out of this client for two reasons. It cannot run without a login: it
+ * dereferences `$app['auth.user']->getGroup()` without a guard while that key defaults to `null`,
+ * and the `getPermissions()` it uses passes the same `null` into
+ * `Permission::isReadable(User $user, …)`, whose parameter is typed and not nullable. And its
+ * answer differs per editor, while this client's deliberately does not — see `getHash()`, which
+ * is kept out of every cache key for exactly that reason. So the editor's rights moved to their
+ * own service when the login arrived in epic 002 (ADR 0019); it guards the call and holds its
+ * answer per request. What this client returns is still the plain schema, in which
+ * `Api::getSchema()` reports every permission as `0`, because it guards the same call where
+ * `getExtendedSchema()` does not — never read a permission off it.
  *
  * THE CORE'S OWN PERSISTED CACHE IS A SEPARATE LAYER. With `APP_ENABLE_SCHEMA_CACHE` switched on,
  * `Api::getSchema()` serves `data/cache/schema.cache` and writes it back. That file outlives the

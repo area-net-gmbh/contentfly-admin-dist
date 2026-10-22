@@ -6,6 +6,7 @@ namespace Areanet\ContentflyAdmin;
 
 use Areanet\ContentflyAdmin\Auth\AdminAuthenticator;
 use Areanet\ContentflyAdmin\Auth\LoginScreen;
+use Areanet\ContentflyAdmin\Auth\PermissionView;
 use Areanet\ContentflyAdmin\Controller\AdminController;
 use Areanet\ContentflyAdmin\Command\PublishAssetsCommand;
 use Areanet\ContentflyAdmin\Controller\AssetController;
@@ -151,6 +152,10 @@ final class AdminManager
 
         $this->app[VersionGuard::CONTAINER_KEY] = static function (): VersionGuard {
             return new VersionGuard();
+        };
+
+        $this->app[PermissionView::CONTAINER_KEY] = static function ($app): PermissionView {
+            return new PermissionView($app, $app[SchemaClient::CONTAINER_KEY]);
         };
 
         $prefix = $this->prefix;
