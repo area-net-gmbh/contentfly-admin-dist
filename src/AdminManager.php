@@ -176,7 +176,7 @@ final class AdminManager
         };
 
         $this->app[MenuBuilder::CONTAINER_KEY] = static function ($app): MenuBuilder {
-            return new MenuBuilder($app[self::CONTAINER_KEY]);
+            return new MenuBuilder($app[self::CONTAINER_KEY], $app[PermissionView::CONTAINER_KEY]);
         };
 
         $this->app[ColumnBuilder::CONTAINER_KEY] = static function ($app): ColumnBuilder {

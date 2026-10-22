@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Areanet\ContentflyAdmin\View;
 
 use Areanet\ContentflyAdmin\AdminManager;
+use Areanet\ContentflyAdmin\Auth\PermissionView;
 
 /**
  * The admin's main menu, built from the schema.
@@ -25,8 +26,16 @@ use Areanet\ContentflyAdmin\AdminManager;
  * where there may not be a database at all. Constructing it therefore touches neither the
  * schema nor the container's heavier services; `build()` is the first moment anything is read.
  *
- * PERMISSIONS ARE NOT ITS JOB YET. That a user without read access does not see an entity here
- * is story 002-009; no provision is made for it on spec.
+ * IT SHOWS ONLY WHAT THE EDITOR MAY READ, and that is tidiness, not protection. An entry is
+ * dropped when `PermissionView` says the entity is not readable (ADR 0019) — but hiding a link
+ * secures nothing on its own: whoever knows the address would still get the page. The refusal
+ * that does the securing sits in the controllers, next to each whitelist check. Both exist
+ * because they answer different questions: this one keeps the menu honest, that one keeps the
+ * data closed.
+ *
+ * THE WHITELIST STAYS THE OUTER BOUND. The permission is applied *within*
+ * `AdminManager::getEntities()`, never beside it — a read permission on an entity the project
+ * did not release still produces no entry (ADR 0005).
  */
 final class MenuBuilder
 {
@@ -48,13 +57,21 @@ final class MenuBuilder
 
     private AdminManager $manager;
 
-    public function __construct(AdminManager $manager)
+    private PermissionView $permissions;
+
+    public function __construct(AdminManager $manager, PermissionView $permissions)
     {
-        $this->manager = $manager;
+        $this->manager     = $manager;
+        $this->permissions = $permissions;
     }
 
     /**
-     * The menu items, in the order the configuration or the schema lists the entities.
+     * The menu items the editor may read, in the order the configuration or the schema lists
+     * the entities.
+     *
+     * An editor with no read permission anywhere gets an empty list, which is a valid answer and
+     * not an error: `layout.html.twig` renders no navigation at all for it rather than an empty
+     * bar.
      *
      * @return list<array{entity: string, label: string, url: string}>
      */
@@ -63,6 +80,10 @@ final class MenuBuilder
         $items = array();
 
         foreach ($this->manager->getEntities() as $entity) {
+            if (!$this->permissions->mayRead($entity)) {
+                continue;
+            }
+
             $items[] = array(
                 'entity' => $entity,
                 'label'  => $entity,
