@@ -271,6 +271,15 @@ final class FileController
             }
         }
 
+        /*
+         * THE UPLOAD MODULE IS REGISTERED EXACTLY WHEN THE ZONE IS RENDERED, which is the write
+         * permission and nothing else. Registering it for a read-only editor would load a module
+         * whose element never exists.
+         */
+        if ($this->mayWrite(self::ENTITY_FILE)) {
+            $controllers['admin-upload'] = 'admin/upload';
+        }
+
         $token = FormToken::issue($request);
 
         $html = $this->app[TemplateRenderer::CONTAINER_KEY]->render('files.html.twig', array(
@@ -303,6 +312,13 @@ final class FileController
              */
             'uploadField'  => self::CORE_UPLOAD_FIELD,
             'uploadAccept' => $manager->getUploadAccept(),
+            /*
+             * The upload module adds this field to ask for the machine-readable answer. It is
+             * deliberately **not** a hidden input: in the markup it would travel with the
+             * no-JavaScript submit too, and that path needs the redirect.
+             */
+            'formatField' => self::FORMAT_FIELD,
+            'formatJson'  => self::FORMAT_JSON,
             'mayWrite'    => $this->mayWrite(self::ENTITY_FILE),
             'mayDelete'   => $this->mayDelete(self::ENTITY_FILE),
             'moveTargets' => $tree === null ? null : self::moveTargets($tree),

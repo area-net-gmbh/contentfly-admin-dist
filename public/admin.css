@@ -1143,6 +1143,79 @@ li {
 }
 
 /*
+ * THE DRAGGED-OVER STATE IS THE ACCENT, and only while something hovers. A permanent accent
+ * border would make the zone compete with the one button it contains.
+ */
+.admin-files__upload--over {
+    border-color: var(--admin-accent);
+}
+
+/*
+ * THE QUEUE (story 003-002).
+ *
+ * ONE ROW PER FILE, each with its own bar — a single total would answer a different question than
+ * the one the editor has, which is which file is still going and which one failed.
+ *
+ * THE BAR IS A NATIVE `<progress>`. It reports itself to assistive technology without an ARIA
+ * role written by hand, and it is the one element in this package whose whole job is this.
+ *
+ * `overflow-wrap` ON THE NAME, because a file name has no spaces to break at and a long one would
+ * otherwise push the zone wider than the column it sits in.
+ */
+.admin-files__upload-queue {
+    flex: 1 0 100%;
+    margin: 0.25rem 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.admin-files__upload-item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem 0.5rem;
+    padding: 0.1875rem 0;
+    font-size: 0.875rem;
+}
+
+.admin-files__upload-name {
+    flex: 1 1 12rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.admin-files__upload-bar {
+    flex: 0 0 8rem;
+    width: 8rem;
+    height: 0.5rem;
+}
+
+.admin-files__upload-state {
+    flex: 1 1 10rem;
+    color: var(--admin-muted);
+}
+
+.admin-files__upload-item--ok .admin-files__upload-state {
+    color: var(--admin-text);
+}
+
+.admin-files__upload-item--problem .admin-files__upload-state {
+    color: var(--admin-danger-text);
+}
+
+/*
+ * THE NOTE APPEARS ONLY WHEN SOMETHING FAILED. Then the module deliberately does not reload — the
+ * rows are the only record of what went wrong — and this is what says that the table below is
+ * older than the upload.
+ */
+.admin-files__upload-note {
+    flex: 1 0 100%;
+    margin: 0.25rem 0 0;
+    color: var(--admin-muted);
+    font-size: 0.875rem;
+}
+
+/*
  * THE REPORT IS ONE SENTENCE ABOUT WHAT JUST HAPPENED, in the two colours the package already
  * uses for the two outcomes — the refusal page's muted tone would make a failure look like a
  * note, and `--admin-danger` would make a success look like one too.

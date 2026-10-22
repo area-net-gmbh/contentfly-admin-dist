@@ -113,7 +113,10 @@
    kein Attribut — und nicht `accept=""`, was jede Datei ausschliessen wuerde.
 #}
             <form class="admin-files__upload" method="post" action="{{ rootUrl }}"
-                  enctype="multipart/form-data">
+                  enctype="multipart/form-data"
+                  data-controller="admin-upload"
+                  data-admin-upload-format-field-value="{{ formatField }}"
+                  data-admin-upload-format-value="{{ formatJson }}">
                 <input type="hidden" name="{{ tokenField }}" value="{{ token }}">
                 <input type="hidden" name="{{ actionField }}" value="{{ actions.upload }}">
                 <input type="hidden" name="{{ folderField }}" value="{{ folder ?? '' }}">
@@ -121,8 +124,20 @@
                     Dateien hierher ziehen oder auswählen
                 </label>
                 <input class="admin-files__upload-input" id="admin-files-upload" type="file"
-                       name="{{ uploadField }}" multiple{% if uploadAccept %} accept="{{ uploadAccept }}"{% endif %}>
-                <button class="admin-files__upload-button" type="submit">Hochladen</button>
+                       name="{{ uploadField }}" multiple{% if uploadAccept %} accept="{{ uploadAccept }}"{% endif %}
+                       data-admin-upload-target="input">
+                <button class="admin-files__upload-button" type="submit"
+                        data-admin-upload-target="button">Hochladen</button>
+                {#
+                   BEIDE BEHAELTER STEHEN LEER UND VERSTECKT IM MARKUP, statt vom Modul erzeugt zu
+                   werden: so steht der Wortlaut des Hinweises im Template bei allen anderen
+                   Saetzen, und das Modul setzt nur `hidden`.
+                #}
+                <ul class="admin-files__upload-queue" data-admin-upload-target="queue" hidden></ul>
+                <p class="admin-files__upload-note" data-admin-upload-target="note" hidden>
+                    Die Liste unten zeigt den Stand vor dem Hochladen —
+                    <a href="{{ folder is null ? rootUrl : rootUrl ~ '?' ~ folderField ~ '=' ~ folder|url_encode }}">Liste aktualisieren</a>.
+                </p>
             </form>
 {% endif %}
 {% if files is empty %}
