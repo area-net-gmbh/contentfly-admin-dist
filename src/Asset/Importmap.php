@@ -49,6 +49,7 @@ final class Importmap
         'admin/file-preview' => 'controllers/file_preview_controller.js',
         'admin/file-variant' => 'controllers/file_variant_controller.js',
         'admin/upload'       => 'controllers/upload_controller.js',
+        'admin/file-picker'  => 'controllers/file_picker_controller.js',
     );
 
     /**

@@ -1,0 +1,27 @@
+{#
+    One image out of the file manager — the `file` alias (ADR 0023).
+
+    THE PLAIN TEXT FIELD STAYS THE FIELD, the same stance `search`, `rte` and `tabs` take. This
+    fragment renders the file's id in an ordinary input and lets the module put a preview and a
+    picker in front of it; what the browser submits is always this one input. Without the module
+    an editor sees the id and can still paste one in — unlovely and working, where a field that
+    needs JavaScript to be editable at all would be a step back from the display it replaces.
+
+    THE PICKER DOES NOT NAVIGATE, and that is the requirement the story is built around: an
+    editor who has to leave a half-filled form to pick an image loses the rest of it. The module
+    fetches its entries from `field.pickerUrl` and never links there.
+
+    THE CURRENT VALUE IS SHOWN AS AN ID AND NOT AS A NAME. Looking the name up would be one query
+    per image field per form render; the preview image answers the same question better, and it
+    costs the form nothing because the browser fetches it.
+
+    `required` IS THE BROWSER'S MARKER AND NOT A SECOND VALIDATION. `#[Admin(required: true)]`
+    marks the field; the authority on an empty value is the core, which answers a column that
+    may not be null with a finding on this field (`FormController::payload()`). This package
+    validates no field itself, and this one is no exception.
+#}
+{% include 'widget/_label.html.twig' %}
+            <div class="admin-form__file" data-controller="admin-file-picker" data-admin-file-picker-url-value="{{ field.pickerUrl }}" data-admin-file-picker-field-value="field-{{ field.property }}" data-admin-file-picker-alias-value="{{ field.alias }}">
+                <input class="admin-form__control" type="text" id="field-{{ field.property }}" name="{{ field.property }}" value="{{ field.value }}" data-admin-file-picker-target="source" autocomplete="off"{% if field.required %} required{% endif %}{% if field.error %} aria-invalid="true" aria-describedby="{{ described }}"{% endif %}>
+                <p class="admin-form__hint" data-admin-file-picker-target="note">Ohne JavaScript steht hier die Id der Datei — sie lässt sich von Hand eintragen.</p>
+            </div>

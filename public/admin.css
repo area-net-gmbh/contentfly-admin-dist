@@ -698,6 +698,180 @@ li {
 }
 
 /*
+ * The image field and its picker overlay (003-004, ADR 0023).
+ *
+ * THE OVERLAY IS A NATIVE `<dialog>`, so its backdrop, its top layer and its focus trap come
+ * from the browser. Only size and inner layout are set here — a hand-built modal would need a
+ * z-index, a scroll lock and a focus trap, and without a bundler (ADR 0007) all three would be
+ * hand-written.
+ *
+ * THE GRID IS SIZED IN `rem` AND NOT IN COLUMNS, so one row holds as many images as the dialog
+ * is wide. An image field is used at every window size, and a fixed column count would either
+ * waste a wide screen or overflow a narrow one.
+ *
+ * A HOVER USES THE `brightness()` FILTER, the form `--admin-hover-dim` is documented for: it is
+ * an amount, not a colour.
+ */
+.admin-form__file {
+    max-width: 44rem;
+}
+
+.admin-form__file-preview {
+    margin: 0 0 0.375rem;
+}
+
+.admin-form__file-image {
+    display: block;
+    max-width: 12rem;
+    max-height: 12rem;
+    border: 1px solid var(--admin-rule);
+    border-radius: 3px;
+}
+
+.admin-form__file-empty {
+    margin: 0;
+    color: var(--admin-muted);
+    font-size: 0.875rem;
+}
+
+.admin-form__file-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+}
+
+.admin-form__file-button {
+    padding: 0.25rem 0.625rem;
+    border: 1px solid var(--admin-rule);
+    border-radius: 3px;
+    font: inherit;
+    color: inherit;
+    background: var(--admin-background);
+    cursor: pointer;
+}
+
+.admin-form__file-button:hover {
+    filter: brightness(var(--admin-hover-dim));
+}
+
+.admin-picker {
+    width: min(52rem, 92vw);
+    max-height: 86vh;
+    border: 1px solid var(--admin-rule);
+    border-radius: 3px;
+    padding: 1rem;
+    color: var(--admin-text);
+    background: var(--admin-background);
+}
+
+.admin-picker__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.admin-picker__title {
+    margin: 0;
+    font-size: 1.125rem;
+}
+
+.admin-picker__close {
+    padding: 0.25rem 0.625rem;
+    border: 1px solid var(--admin-rule);
+    border-radius: 3px;
+    font: inherit;
+    color: inherit;
+    background: var(--admin-background);
+    cursor: pointer;
+}
+
+.admin-picker__close:hover {
+    filter: brightness(var(--admin-hover-dim));
+}
+
+.admin-picker__crumbs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin: 0.625rem 0 0;
+}
+
+.admin-picker__crumb {
+    border: 0;
+    padding: 0.125rem 0.25rem;
+    font: inherit;
+    font-size: 0.875rem;
+    color: var(--admin-accent);
+    background: transparent;
+    cursor: pointer;
+    text-decoration: underline;
+}
+
+.admin-picker__status {
+    margin: 0.625rem 0 0;
+    color: var(--admin-muted);
+    font-size: 0.875rem;
+}
+
+.admin-picker__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
+    gap: 0.625rem;
+    margin: 0.625rem 0 0;
+    padding: 0;
+    list-style: none;
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+.admin-picker__file,
+.admin-picker__folder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.375rem;
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid var(--admin-rule);
+    border-radius: 3px;
+    font: inherit;
+    text-align: center;
+    color: inherit;
+    background: var(--admin-background);
+    cursor: pointer;
+}
+
+.admin-picker__file:hover,
+.admin-picker__folder:hover {
+    filter: brightness(var(--admin-hover-dim));
+}
+
+.admin-picker__image {
+    width: 100%;
+    height: 6rem;
+    object-fit: contain;
+}
+
+/* The badge stands where the image would — so the grid does not jump per row. */
+.admin-picker__badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 6rem;
+    border-radius: 3px;
+    background: var(--admin-rule);
+    font-size: 0.875rem;
+    letter-spacing: 0.05em;
+}
+
+.admin-picker__name {
+    font-size: 0.8125rem;
+    overflow-wrap: anywhere;
+}
+
+/*
  * The list's filter bar (002-004-0002).
  *
  * IT WRAPS INSTEAD OF SCROLLING. The number of controls follows the entity — one on `Feldtyp`,

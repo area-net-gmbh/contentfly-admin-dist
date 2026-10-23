@@ -85,7 +85,7 @@ final class FormController
      *
      * `false` IS NOT A GAP, it is the honest answer while the element does not exist:
      * `readonly` by definition, `entity`/`entitylist`/`radio`/`checkboxgroup` until
-     * 002-007-0004, `file`/`filelist` until story 003-004, `permissionmatrix` as the secondary
+     * 002-007-0004, `filelist` until story 003-004-0004, `permissionmatrix` as the secondary
      * case ADR 0013 describes. A bare text box over a relation would be a control whose value
      * this package cannot form correctly; displaying it risks nothing.
      *
@@ -109,7 +109,7 @@ final class FormController
         'entitylist'       => true,
         'radio'            => true,
         'checkboxgroup'    => true,
-        'file'             => false,
+        'file'             => true,
         'filelist'         => false,
         'permissionmatrix' => false,
         'readonly'         => false,
@@ -130,6 +130,20 @@ final class FormController
      * more target records than a list may offer.
      */
     private const RELATION_FRAGMENTS = array('entity', 'entitylist', 'radio', 'checkboxgroup');
+
+    /**
+     * The fragments whose value is the id of another record.
+     *
+     * A DIFFERENT QUESTION FROM `RELATION_FRAGMENTS`, AND THEY STOPPED HAVING THE SAME ANSWER
+     * WITH THE IMAGE FIELDS. That list is "whose options have to be fetched before the control
+     * can be drawn"; this one is "whose value has to be read out of a relation entry". `file`
+     * carries an id exactly like `entity` does, but it has no option list to fetch — its picker
+     * asks for entries when it opens (ADR 0023), which is the whole reason it is not an
+     * optionless `select`. Answering both questions from one list would mean either fetching
+     * options nobody draws, or handing a value object to `datetime()` because it happens to be
+     * an array.
+     */
+    private const ID_FRAGMENTS = array('entity', 'entitylist', 'radio', 'checkboxgroup', 'file');
 
     /** The fragments that post several values under one property, so `<name>[]`. */
     private const LIST_FRAGMENTS = array('entitylist', 'checkboxgroup');
@@ -582,6 +596,10 @@ final class FormController
             if ($field['fragment'] === 'search') {
                 $controllers['admin-search'] = 'admin/search';
             }
+
+            if ($field['fragment'] === 'file') {
+                $controllers['admin-file-picker'] = 'admin/file-picker';
+            }
         }
 
         return $controllers;
@@ -868,6 +886,9 @@ final class FormController
                 'values'    => self::selected($raw),
                 'list'      => $prepared[$property]['list'] ?? false,
                 'searchUrl' => $prepared[$property]['search'] ?? null,
+                /* Only the image fragments read this; for every other one the template ignores it. */
+                'pickerUrl' => $prepared[$property]['picker'] ?? null,
+                'alias'     => $prepared[$property]['alias'] ?? null,
                 'checked'   => self::checked($raw),
                 'error'     => $errors[$property] ?? null,
             );
@@ -945,8 +966,17 @@ final class FormController
          * package: the prefix belongs to the project and `MenuBuilder` owns the spelling of an
          * entity in a URL (ADR 0011).
          */
-        $options = $this->app[AdminManager::CONTAINER_KEY]->getPrefix()
-            .'/options/'.MenuBuilder::entityToUrl($name);
+        $manager = $this->app[AdminManager::CONTAINER_KEY];
+        $prefix  = $manager->getPrefix();
+        $options = $prefix.'/options/'.MenuBuilder::entityToUrl($name);
+
+        /*
+         * THE PICKER'S ADDRESS IS THE SAME FOR EVERY IMAGE FIELD — it carries no entity and no
+         * property, because the files it offers do not depend on either (ADR 0023). The trailing
+         * slash belongs to it: the route is `mount($prefix.'/filepicker')` plus `get('')`, which
+         * is `…/filepicker/`, and without it the router answers 500 like every sibling mount.
+         */
+        $picker = $prefix.'/filepicker/';
 
         $prepared = array();
 
@@ -989,6 +1019,17 @@ final class FormController
                 'options'  => $choices,
                 'list'     => $list,
                 'search'   => $search,
+                'picker'   => $fragment === 'file' ? $picker : null,
+                /*
+                 * THE ALIAS IS CONFIGURATION AND COSTS NOTHING TO PASS, which is the whole
+                 * reason the chosen image can show a small version at all: the form does not
+                 * look the file up (one query per image field per render), so it cannot know the
+                 * file's type and cannot decide whether a derivative exists. The browser tries
+                 * the small version and falls back to the stored file — the same division of
+                 * labour ADR 0020 chose for the listing, for the same unanswerable question
+                 * (Schema-Vertrag L25).
+                 */
+                'alias'    => $fragment === 'file' ? $manager->getThumbnailAlias() : null,
             );
         }
 
@@ -1064,7 +1105,7 @@ final class FormController
          * array `['id' => …, 'pim_blocked' => true]` when they may not. Both have to work, or a
          * relation the editor cannot read would lose its selection on save.
          */
-        if (in_array($fragment, self::RELATION_FRAGMENTS, true)) {
+        if (in_array($fragment, self::ID_FRAGMENTS, true)) {
             return self::relationId($value) ?? '';
         }
 
