@@ -612,6 +612,19 @@ final class FormController
             if (in_array($field['fragment'], self::IMAGE_FRAGMENTS, true)) {
                 $controllers['admin-file-picker'] = 'admin/file-picker';
             }
+
+            /*
+             * THE SORTER HAS TO BE REGISTERED HERE ALTHOUGH ITS ELEMENT IS BUILT IN THE BROWSER.
+             * Stimulus connects a controller to a late element happily — but only if the
+             * identifier was registered with the application, and this page registers exactly
+             * what this method answers. Without this the picker would render a list with handles
+             * that do nothing at all; caught by the probe of 003-004-0005, not by reading.
+             *
+             * ONLY WHERE AN ORDER CAN BE STORED, like the handle itself (gap L12).
+             */
+            if (($field['sortable'] ?? false) === true) {
+                $controllers['admin-sortable'] = 'admin/sortable';
+            }
         }
 
         return $controllers;
@@ -895,12 +908,19 @@ final class FormController
                 'options'   => $prepared[$property]['options'] ?? array(),
                 'value'     => self::value($raw, $fragment),
                 /* Only the list fragments read this; for every other one the template ignores it. */
-                'values'    => self::selected($raw),
+                'values'    => self::selected($raw, $widget['through'] ?? null),
                 'list'      => $prepared[$property]['list'] ?? false,
                 'searchUrl' => $prepared[$property]['search'] ?? null,
                 /* Only the image fragments read this; for every other one the template ignores it. */
                 'pickerUrl' => $prepared[$property]['picker'] ?? null,
                 'alias'     => $prepared[$property]['alias'] ?? null,
+                /*
+                 * READ OFF THE WIDGET AND NOT THE FRAGMENT, because this is a fact about the
+                 * field's storage: only one of the two `multifile` forms can hold an order
+                 * (gap L12, `WidgetResolver`). A field whose fragment is not `filelist` has no
+                 * such key, and `false` is then the honest answer.
+                 */
+                'sortable'  => ($widget['sortable'] ?? null) === true,
                 'checked'   => self::checked($raw),
                 'error'     => $errors[$property] ?? null,
             );
@@ -1063,6 +1083,7 @@ final class FormController
                 'alias'    => in_array($fragment, self::IMAGE_FRAGMENTS, true)
                     ? $manager->getThumbnailAlias()
                     : null,
+                'sortable' => $fragment === 'filelist' && ($widget['sortable'] ?? null) === true,
             );
         }
 
@@ -1178,16 +1199,32 @@ final class FormController
      *
      * @return list<string>
      */
-    private static function selected($value): array
+    private static function selected($value, ?string $through = null): array
     {
         if (!is_array($value)) {
             return array();
         }
 
+        if ($through !== null) {
+            $value = self::ordered($value);
+        }
+
         $ids = array();
 
         foreach ($value as $entry) {
-            $id = self::relationId($entry);
+            /*
+             * THE IN-BETWEEN RECORD IS STEPPED THROUGH WHERE THERE IS ONE. A sortable
+             * `multifile` answers with `BaseSortable` rows whose `id` belongs to the row and not
+             * to the file (`WidgetResolver`, key `through`) — so the file is read from that
+             * property first. The fallback is not a safety net but the second shape this method
+             * has always had to serve: a rejected submission answers plain ids, and those have no
+             * property to step through.
+             */
+            $id = $through === null ? null : self::relationId(self::property($entry, $through));
+
+            if ($id === null) {
+                $id = self::relationId($entry);
+            }
 
             if ($id !== null) {
                 $ids[] = $id;
@@ -1195,6 +1232,63 @@ final class FormController
         }
 
         return $ids;
+    }
+
+    /**
+     * One property out of a value object or an array, or `null`.
+     *
+     * @param mixed $entry
+     *
+     * @return mixed
+     */
+    private static function property($entry, string $name)
+    {
+        if (is_object($entry)) {
+            return $entry->{$name} ?? null;
+        }
+
+        return is_array($entry) ? ($entry[$name] ?? null) : null;
+    }
+
+    /**
+     * The entries of a sortable list in their stored order.
+     *
+     * THE CORE DOES NOT ORDER THEM, measured against the running harness: rows written with
+     * `sorting` 10, 9 and 8 come back 10, 8, 9. `MultifileType::fromDatabase()` walks the
+     * collection as Doctrine hands it over, and nothing in that path mentions `sorting` — so the
+     * sequence an editor dragged into place would be shown in an arbitrary order on the next
+     * open, and saved in that arbitrary order afterwards.
+     *
+     * AN ENTRY WITHOUT `sorting` KEEPS ITS PLACE. The sort is stable and treats a missing value
+     * as "after everything that has one", so a shape this method does not know cannot be
+     * reordered into nonsense — it only cannot be sorted.
+     *
+     * @param list<mixed> $entries
+     *
+     * @return list<mixed>
+     */
+    private static function ordered(array $entries): array
+    {
+        $withSorting = array();
+        $without     = array();
+
+        foreach ($entries as $entry) {
+            $sorting = self::property($entry, 'sorting');
+
+            if (is_numeric($sorting)) {
+                $withSorting[] = array('sorting' => (float) $sorting, 'entry' => $entry);
+                continue;
+            }
+
+            $without[] = $entry;
+        }
+
+        /* `usort` is not stable before PHP 8.0; this package requires 8.3, so it is. */
+        usort($withSorting, static function (array $a, array $b): int {
+            return $a['sorting'] <=> $b['sorting'];
+        });
+
+        return array_merge(array_column($withSorting, 'entry'), $without);
     }
 
     /**

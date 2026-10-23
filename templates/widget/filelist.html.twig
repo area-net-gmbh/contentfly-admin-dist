@@ -19,7 +19,7 @@
     would delete every image the record has. The reasoning sits at that branch.
 #}
 {% include 'widget/_label.html.twig' %}
-            <div class="admin-form__file" data-controller="admin-file-picker" data-admin-file-picker-url-value="{{ field.pickerUrl }}" data-admin-file-picker-field-value="field-{{ field.property }}" data-admin-file-picker-alias-value="{{ field.alias }}" data-admin-file-picker-multiple-value="true">
+            <div class="admin-form__file" data-controller="admin-file-picker" data-admin-file-picker-url-value="{{ field.pickerUrl }}" data-admin-file-picker-field-value="field-{{ field.property }}" data-admin-file-picker-alias-value="{{ field.alias }}" data-admin-file-picker-multiple-value="true" data-admin-file-picker-sortable-value="{{ field.sortable ? 'true' : 'false' }}">
                 <input class="admin-form__control" type="text" id="field-{{ field.property }}" name="{{ field.property }}" value="{{ field.values|join(',') }}" data-admin-file-picker-target="source" autocomplete="off"{% if field.required %} required{% endif %}{% if field.error %} aria-invalid="true" aria-describedby="{{ described }}"{% endif %}>
                 <p class="admin-form__hint" data-admin-file-picker-target="note">Ohne JavaScript stehen hier die Kennungen der Dateien, durch Komma getrennt — sie lassen sich von Hand eintragen.</p>
             </div>

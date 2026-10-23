@@ -799,6 +799,35 @@ li {
     max-height: 6rem;
 }
 
+/*
+ * The drag handle of a sortable list (003-004-0005).
+ *
+ * A REAL BUTTON, so the keyboard reaches it. Dragging answers a pointer only; the arrow keys are
+ * what make the order reachable without one, and that needs something focusable.
+ *
+ * `cursor: grab` AND NOT `move`, because the handle is what is grabbed — the pointer says what
+ * can be done here, not what will happen to the page.
+ */
+.admin-sortable__handle {
+    border: 1px solid var(--admin-rule);
+    border-radius: 3px;
+    padding: 0 0.25rem;
+    font: inherit;
+    line-height: 1.2;
+    color: var(--admin-muted);
+    background: var(--admin-background);
+    cursor: grab;
+}
+
+.admin-sortable__handle:hover {
+    filter: brightness(var(--admin-hover-dim));
+}
+
+/* The entry being dragged stays visible but says that it is in motion. */
+.admin-sortable__item--dragging {
+    opacity: 0.5;
+}
+
 .admin-picker {
     width: min(52rem, 92vw);
     max-height: 86vh;

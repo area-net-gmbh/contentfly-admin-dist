@@ -120,13 +120,14 @@ final class WidgetResolver
      *
      * Every definition carries `widget`, `type`, `required`, `readonly` and `default`. The keys
      * that only some widgets need are present only where they apply: `maxlength`, `options`,
-     * `group` and `target`. A template therefore never has to tell "absent" from "empty".
+     * `group`, `target`, `sortable` and `through`. A template therefore never has to tell
+     * "absent" from "empty".
      *
      * @param string                    $entity   Entity name as the schema spells it
      * @param string                    $property The property name
      * @param array<string,mixed>|mixed $meta     The field's schema entry
      *
-     * @return array{widget: string, type: string|null, required: bool, readonly: bool, default: mixed, maxlength?: int, options?: array<int,mixed>, group?: string, target?: string}
+     * @return array{widget: string, type: string|null, required: bool, readonly: bool, default: mixed, maxlength?: int, options?: array<int,mixed>, group?: string, target?: string, sortable?: bool, through?: string}
      */
     public function resolve(string $entity, string $property, $meta): array
     {
@@ -168,6 +169,36 @@ final class WidgetResolver
         $group = $meta['group'] ?? null;
         if (in_array($widget, self::GROUPED_WIDGETS, true) && is_string($group) && $group !== '') {
             $definition['group'] = $group;
+        }
+
+        /*
+         * `sortable` TRAVELS FOR THE MULTI-IMAGE WIDGET ALONE, and it is the first fact this
+         * class passes on that is about *storage* rather than about the element. It has to: a
+         * `multifile` can hold an order only in the `OneToMany` + `#[PIM\ManyToMany]` form with
+         * a `BaseSortable` target, and in the ordinary `#[ORM\ManyToMany]` form the core answers
+         * `false` (gap L12). The widget offers a drag handle only where the answer is `true`,
+         * because a handle on the other form would promise a sequence that is gone after the save
+         * (ADR 0023). Always present for this widget, so the template reads a boolean and not an
+         * absence.
+         */
+        if ($widget === 'filelist') {
+            $definition['sortable'] = ($meta['sortable'] ?? null) === true;
+
+            /*
+             * `through` IS WHAT MAKES THE SORTABLE FORM READABLE AT ALL, and it is a measured
+             * necessity rather than a convenience. In that form the core answers the field with
+             * the **in-between** records — the `BaseSortable` rows — and their `id` is the id of
+             * such a row, not of the file. The file sits one level in, under the property the
+             * schema names in `mappedBy`. Reading `id` there would hand the form the wrong ids,
+             * and writing them back finds no file for them: measured against the running harness,
+             * a second save of an unchanged form empties the whole collection. So the property
+             * name travels with the definition, and the form dereferences it.
+             */
+            $through = $meta['mappedBy'] ?? null;
+
+            if ($definition['sortable'] && is_string($through) && $through !== '') {
+                $definition['through'] = $through;
+            }
         }
 
         $target = self::target($type, $meta);

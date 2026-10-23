@@ -33,10 +33,11 @@ import { Controller } from '@hotwired/stimulus';
 export default class extends Controller {
     static targets = ['source', 'note'];
 
-    static values = { url: String, field: String, alias: String, multiple: Boolean };
+    static values = { url: String, field: String, alias: String, multiple: Boolean, sortable: Boolean };
 
     connect() {
         this.pending = null;
+        this.rendered = [];
 
         this.preview = document.createElement('div');
         this.preview.className = 'admin-form__file-preview';
@@ -73,11 +74,33 @@ export default class extends Controller {
         this.sourceTarget.hidden = true;
         this.noteTarget.hidden = true;
 
+        /*
+         * THE FIELD IS THE ONE TRUTH, SO THE LIST FOLLOWS IT — including when somebody else
+         * writes it. `admin/sortable` does exactly that after a move.
+         *
+         * A PURE REORDER IS NOT REDRAWN, and that is not an optimisation. The sorter has already
+         * moved the entry in the DOM, so a rebuild would only replace the element the keyboard
+         * focus is sitting on and drop the focus with it — the next arrow key would then do
+         * nothing. Only a changed *set* of ids needs a new list.
+         */
+        this.onSourceChange = () => {
+            const now = this.ids;
+            const same = now.length === this.rendered.length
+                && now.every((id) => this.rendered.includes(id));
+
+            if (!same) {
+                this.render();
+            }
+        };
+
+        this.sourceTarget.addEventListener('change', this.onSourceChange);
+
         this.render();
     }
 
     disconnect() {
         this.abort();
+        this.sourceTarget.removeEventListener('change', this.onSourceChange);
 
         if (this.dialog !== undefined) {
             this.dialog.remove();
@@ -112,8 +135,9 @@ export default class extends Controller {
     set ids(values) {
         /* A repeated id would be one entry the core keeps and one the editor cannot remove. */
         this.sourceTarget.value = [...new Set(values)].join(',');
+
+        /* The redraw happens in the `change` handler, so there is one path and not two. */
         this.sourceTarget.dispatchEvent(new Event('change', { bubbles: true }));
-        this.render();
     }
 
     /**
@@ -141,6 +165,7 @@ export default class extends Controller {
     render() {
         const chosen = this.ids;
 
+        this.rendered = chosen;
         this.preview.replaceChildren();
         this.clear.hidden = chosen.length === 0;
 
@@ -168,9 +193,30 @@ export default class extends Controller {
         const list = document.createElement('ul');
         list.className = 'admin-form__file-list';
 
+        /*
+         * THE SORTER IS A CONTROLLER OF ITS OWN, PUT ON THIS LIST — not code in here. It writes
+         * the order into the same field this controller owns, and it knows nothing about images,
+         * so the tree of epic 004 can use it on a list of its own (ADR 0023). Stimulus connects
+         * it although this element was built just now.
+         *
+         * ONLY WHERE AN ORDER CAN BE STORED. `sortableValue` comes from the field's schema
+         * (gap L12): in the ordinary `ManyToMany` form there is no column for a sequence, and a
+         * handle would promise one that is gone after the save.
+         */
+        if (this.sortableValue) {
+            list.dataset.controller = 'admin-sortable';
+            list.dataset.adminSortableFieldValue = this.fieldValue;
+        }
+
         for (const id of chosen) {
             const item = document.createElement('li');
             item.className = 'admin-form__file-item';
+
+            if (this.sortableValue) {
+                item.dataset.sortableId = id;
+                item.dataset.sortableLabel = this.name === '' ? 'Bild' : `Bild ${id}`;
+            }
+
             item.append(this.thumb(id));
 
             const drop = document.createElement('button');
@@ -187,6 +233,23 @@ export default class extends Controller {
         }
 
         this.preview.append(list);
+
+        /*
+         * THE LIMIT IS SAID, NOT LEFT TO BE GUESSED (ADR 0023). Where no order can be stored
+         * there is no handle — and a list of images without a handle looks exactly like one
+         * whose handle failed to appear. So the field says why.
+         *
+         * FROM TWO ENTRIES ON, because that is when a sequence begins to mean anything; telling
+         * somebody that one image cannot be reordered would be noise.
+         */
+        if (!this.sortableValue && chosen.length > 1) {
+            const limit = document.createElement('p');
+            limit.className = 'admin-form__hint';
+            limit.textContent = 'Die Reihenfolge dieser Bilder lässt sich nicht festlegen — '
+                + 'für diese Art der Verknüpfung speichert das Grundsystem keine.';
+            this.preview.append(limit);
+        }
+
         this.mark();
     }
 
