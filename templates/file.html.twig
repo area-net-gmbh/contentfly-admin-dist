@@ -9,11 +9,13 @@
     root when it lies outside the folders — derived from the record and not from history, so it
     works for somebody who arrived from a bookmark.
 
-    THE FOLDER LINE HAS THREE REASONS TO CARRY NO LINK, and the missing right is checked first.
-    Measured, after the other order was written here: without the right to read folders the core
-    leaves the masked join empty, so a file inside a folder looks exactly like one outside them —
-    and this page said „Ausserhalb der Ordner" about it. A missing right takes an answer away
-    (ADR 0019); it must not produce a different, wrong one.
+    THE FOLDER LINE HAS THREE REASONS TO CARRY NO LINK, and they are asked in the plain order.
+    That it is safe to ask `isRoot` first is `FileController`'s doing: without the right to read
+    folders the core leaves the masked join empty, so a file inside a folder looks exactly like
+    one outside them — and this page said „Ausserhalb der Ordner" about it until the controller
+    stopped claiming `isRoot` without that right. A missing right takes an answer away
+    (ADR 0019); it must not produce a different, wrong one. The rule lives there, in one place,
+    and not a second time in this condition.
 
     THE PREVIEW IS EITHER AN IMAGE OR A LABEL, never an empty box — the listing's rule, and for
     its reason: a preview that failed to load and a file that was never going to have one must
@@ -96,10 +98,10 @@
             <dd class="admin-file__value">
 {% if folderUrl %}
                 <a href="{{ folderUrl }}">{{ folderTitle }}</a>
-{% elseif not mayReadFolders %}
-                <span class="admin-file__muted">Nicht einsehbar — es fehlt das Recht, Ordner zu lesen.</span>
 {% elseif isRoot %}
                 Ausserhalb der Ordner
+{% elseif not mayReadFolders %}
+                <span class="admin-file__muted">Nicht einsehbar — es fehlt das Recht, Ordner zu lesen.</span>
 {% else %}
                 <span class="admin-file__muted">Der Ordner ist nicht mehr vorhanden.</span>
 {% endif %}

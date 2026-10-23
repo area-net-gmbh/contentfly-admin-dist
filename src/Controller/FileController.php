@@ -672,6 +672,11 @@ final class FileController
              * a file **inside** a folder arrives with no folder at all. Derived from `$folderId`
              * alone the page stated „Ausserhalb der Ordner" for it — an untruth, and the one
              * reading a missing right must never produce.
+             *
+             * THIS CONDITION CARRIES THE RULE ON ITS OWN. The template asks `isRoot` in the
+             * ordinary order and does not re-check the right; the sabotage run of 003-003-0005
+             * is why it is that way round — with the check in both places neither could be shown
+             * to work, and the data being true is the better of the two to keep.
              */
             'isRoot'         => $mayReadFolders && $folderId === null,
             'mayWrite'    => $mayWrite,
@@ -1283,9 +1288,15 @@ final class FileController
     /**
      * One entry per configured alias, or an empty list when there can be none.
      *
-     * NOTHING AT ALL FOR A FILE THAT IS NOT ONE OF THE THREE DERIVABLE TYPES. The core answers a
-     * size request for a PDF with a `FileNotFoundException` and so a 500 (Schema-Vertrag 8.2) —
-     * not asking is the whole point, exactly as it is for the listing's thumbnail (ADR 0020).
+     * NOTHING AT ALL FOR A FILE THAT IS NOT ONE OF THE THREE DERIVABLE TYPES, and the gate for
+     * that is `preview()` and only `preview()`. The core answers a size request for a PDF with a
+     * `FileNotFoundException` and so a 500 (Schema-Vertrag 8.2) — not asking is the whole point,
+     * exactly as it is for the listing's thumbnail (ADR 0020).
+     *
+     * AN EARLIER VERSION REPEATED THE TYPE CHECK HERE, and the sabotage run of 003-003-0005
+     * found it out: removing it changed nothing, because `preview()` answers `null` for such a
+     * file anyway and the loop below skips that. Two guards for one rule mean neither can be
+     * shown to work, so the second one is gone.
      *
      * NO `1x`/`2x` SEGMENT, AND THAT IS MEASURED RATHER THAN CHOSEN FOR TIDINESS. Both default
      * `ThumbnailSetting` rows carry `isResponsive = 0`, so no variant derivative is ever
@@ -1301,10 +1312,6 @@ final class FileController
      */
     private static function variants(string $id, string $name, string $type, array $aliases): array
     {
-        if (!in_array($type, self::THUMBNAILABLE, true)) {
-            return array();
-        }
-
         $variants = array();
 
         foreach ($aliases as $alias) {
