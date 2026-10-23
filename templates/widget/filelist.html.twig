@@ -1,0 +1,25 @@
+{#
+    Several images out of the file manager — the `multifile` alias (ADR 0023).
+
+    ONE TEXT FIELD WITH COMMAS, NOT A HIDDEN INPUT PER ENTRY. The ids have to survive without the
+    module, and a hidden input is not editable — so this takes the same no-JavaScript form the
+    search fragment takes for a multi-value relation, and `FormController::payload()` turns the
+    comma-separated string back into a list. That is also why `filelist` is a `LIST_FRAGMENTS`
+    entry: an emptied list sends an empty string, and only a list field reads "cleared" out of
+    that instead of "unchanged".
+
+    THE ORDER IS THE ORDER OF THE FIELD. The core writes the posted sequence — for the sortable
+    form it even stores it (`MultifileType::toDatabase()` counts `sorting` up as it walks the
+    posted ids). Dragging arrives in 003-004-0005; until then the sequence is the one the core
+    answered.
+
+    WITHOUT THE RIGHT TO READ FILES THIS FRAGMENT IS NEVER REACHED. `FormController::prepare()`
+    sends the field to `readonly` in that case, because the core answers the whole list with
+    `null` rather than with blocked entries — rendering it as an empty list and writing it back
+    would delete every image the record has. The reasoning sits at that branch.
+#}
+{% include 'widget/_label.html.twig' %}
+            <div class="admin-form__file" data-controller="admin-file-picker" data-admin-file-picker-url-value="{{ field.pickerUrl }}" data-admin-file-picker-field-value="field-{{ field.property }}" data-admin-file-picker-alias-value="{{ field.alias }}" data-admin-file-picker-multiple-value="true">
+                <input class="admin-form__control" type="text" id="field-{{ field.property }}" name="{{ field.property }}" value="{{ field.values|join(',') }}" data-admin-file-picker-target="source" autocomplete="off"{% if field.required %} required{% endif %}{% if field.error %} aria-invalid="true" aria-describedby="{{ described }}"{% endif %}>
+                <p class="admin-form__hint" data-admin-file-picker-target="note">Ohne JavaScript stehen hier die Kennungen der Dateien, durch Komma getrennt — sie lassen sich von Hand eintragen.</p>
+            </div>

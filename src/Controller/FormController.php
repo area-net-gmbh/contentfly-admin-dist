@@ -15,6 +15,7 @@ use Areanet\ContentflyAdmin\View\MenuBuilder;
 use Areanet\ContentflyAdmin\View\RelationOptions;
 use Areanet\ContentflyAdmin\View\RichText;
 use Areanet\ContentflyAdmin\View\TemplateRenderer;
+use Areanet\ContentflyAdmin\View\WidgetResolver;
 use Areanet\PIM\Classes\Api;
 use Areanet\PIM\Classes\Exceptions\ContentflyException;
 use Areanet\PIM\Classes\Language;
@@ -85,8 +86,7 @@ final class FormController
      *
      * `false` IS NOT A GAP, it is the honest answer while the element does not exist:
      * `readonly` by definition, `entity`/`entitylist`/`radio`/`checkboxgroup` until
-     * 002-007-0004, `filelist` until story 003-004-0004, `permissionmatrix` as the secondary
-     * case ADR 0013 describes. A bare text box over a relation would be a control whose value
+     * 002-007-0004, `permissionmatrix` as the secondary case ADR 0013 describes. A bare text box over a relation would be a control whose value
      * this package cannot form correctly; displaying it risks nothing.
      *
      * A KEY THAT IS NOT LISTED AT ALL — a 22nd core type, a project override naming something
@@ -110,7 +110,7 @@ final class FormController
         'radio'            => true,
         'checkboxgroup'    => true,
         'file'             => true,
-        'filelist'         => false,
+        'filelist'         => true,
         'permissionmatrix' => false,
         'readonly'         => false,
         /*
@@ -145,8 +145,20 @@ final class FormController
      */
     private const ID_FRAGMENTS = array('entity', 'entitylist', 'radio', 'checkboxgroup', 'file');
 
-    /** The fragments that post several values under one property, so `<name>[]`. */
-    private const LIST_FRAGMENTS = array('entitylist', 'checkboxgroup');
+    /** The image fragments, which share a picker and the question above. */
+    private const IMAGE_FRAGMENTS = array('file', 'filelist');
+
+    /**
+     * The fragments that carry several values under one property.
+     *
+     * THE POSTING SHAPE IS THE FRAGMENT'S OWN, which is why this says "carry" and not `<name>[]`
+     * any more. `entitylist` and `checkboxgroup` post `<name>[]`, because a box per option is
+     * what they draw. `filelist` posts **one** text field with the ids separated by commas — the
+     * same no-JavaScript form the search fragment uses, because its entries are thumbnails and
+     * not boxes, and a hidden input per entry would leave nothing to edit when the module does
+     * not load. `payload()` reads both shapes.
+     */
+    private const LIST_FRAGMENTS = array('entitylist', 'checkboxgroup', 'filelist');
 
     /**
      * Core aliases that are shown and never offered, whatever widget key they carry.
@@ -597,7 +609,7 @@ final class FormController
                 $controllers['admin-search'] = 'admin/search';
             }
 
-            if ($field['fragment'] === 'file') {
+            if (in_array($field['fragment'], self::IMAGE_FRAGMENTS, true)) {
                 $controllers['admin-file-picker'] = 'admin/file-picker';
             }
         }
@@ -994,6 +1006,25 @@ final class FormController
              */
             $list = in_array($fragment, self::LIST_FRAGMENTS, true);
 
+            /*
+             * A LIST THE EDITOR CANNOT READ MUST NOT BE WRITABLE, and that is not caution but a
+             * measured consequence. `Types/MultifileType::fromDatabase()` answers `null` — not a
+             * list of blocked entries the way `FileType` does — as soon as `PIM\File` is
+             * unreadable, so the form would render an empty list; and its `toDatabase()` answers
+             * an empty value by clearing the collection. Writable, this field would therefore
+             * delete every image a record has the moment somebody without the file right saves
+             * the form, having never seen them. `readonly` takes it out of the save path entirely
+             * (`writableFragment()`), which is what ADR 0019 asks for: a missing right takes an
+             * answer away, it never produces a different one — and it certainly never destroys.
+             *
+             * THE SINGLE `file` FIELD DOES NOT NEED THIS. There the core answers
+             * `['id' => …, 'pim_blocked' => true]`, so the id travels through the form and is
+             * written back unchanged (measured in 003-004-0003).
+             */
+            if ($fragment === 'filelist' && !$this->mayRead(WidgetResolver::FILE_ENTITY)) {
+                $fragment = 'readonly';
+            }
+
             if (in_array($fragment, self::RELATION_FRAGMENTS, true)) {
                 $relation = $provider->forField($widget, $request);
 
@@ -1019,7 +1050,7 @@ final class FormController
                 'options'  => $choices,
                 'list'     => $list,
                 'search'   => $search,
-                'picker'   => $fragment === 'file' ? $picker : null,
+                'picker'   => in_array($fragment, self::IMAGE_FRAGMENTS, true) ? $picker : null,
                 /*
                  * THE ALIAS IS CONFIGURATION AND COSTS NOTHING TO PASS, which is the whole
                  * reason the chosen image can show a small version at all: the form does not
@@ -1029,7 +1060,9 @@ final class FormController
                  * labour ADR 0020 chose for the listing, for the same unanswerable question
                  * (Schema-Vertrag L25).
                  */
-                'alias'    => $fragment === 'file' ? $manager->getThumbnailAlias() : null,
+                'alias'    => in_array($fragment, self::IMAGE_FRAGMENTS, true)
+                    ? $manager->getThumbnailAlias()
+                    : null,
             );
         }
 

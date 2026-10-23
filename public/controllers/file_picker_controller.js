@@ -1,5 +1,10 @@
 /*
- * Choosing an image for a form field, without leaving the form (003-004, ADR 0023).
+ * Choosing images for a form field, without leaving the form (003-004, ADR 0023).
+ *
+ * ONE CONTROLLER FOR BOTH IMAGE FIELDS. `multipleValue` decides whether the field holds one id
+ * or a comma-separated list; everything else — the overlay, the folder walk, the preview chain —
+ * is the same act. Two modules would be two places to keep in step, and the difference is three
+ * branches.
  *
  * THE PLAIN TEXT FIELD STAYS THE FIELD. This controller hides it, puts a preview and two buttons
  * in front of it, and writes every choice back into it — so what the browser submits is always
@@ -28,7 +33,7 @@ import { Controller } from '@hotwired/stimulus';
 export default class extends Controller {
     static targets = ['source', 'note'];
 
-    static values = { url: String, field: String, alias: String };
+    static values = { url: String, field: String, alias: String, multiple: Boolean };
 
     connect() {
         this.pending = null;
@@ -39,21 +44,23 @@ export default class extends Controller {
         this.choose = document.createElement('button');
         this.choose.type = 'button';
         this.choose.className = 'admin-form__file-button';
-        this.choose.textContent = 'Bild wählen';
+        this.choose.textContent = this.multipleValue ? 'Bilder wählen' : 'Bild wählen';
         this.choose.addEventListener('click', () => this.open());
 
         this.clear = document.createElement('button');
         this.clear.type = 'button';
         this.clear.className = 'admin-form__file-button';
-        this.clear.textContent = 'Entfernen';
-        this.clear.addEventListener('click', () => this.pick(''));
+        this.clear.textContent = this.multipleValue ? 'Alle entfernen' : 'Entfernen';
+        this.clear.addEventListener('click', () => {
+            this.ids = [];
+        });
 
         const label = document.querySelector(`label[for="${this.fieldValue}"]`);
-        const name = label === null ? '' : label.textContent.replace('*', '').trim();
+        this.name = label === null ? '' : label.textContent.replace('*', '').trim();
 
-        if (name !== '') {
-            this.choose.setAttribute('aria-label', `${name} — Bild wählen`);
-            this.clear.setAttribute('aria-label', `${name} — Bild entfernen`);
+        if (this.name !== '') {
+            this.choose.setAttribute('aria-label', `${this.name} — ${this.choose.textContent}`);
+            this.clear.setAttribute('aria-label', `${this.name} — ${this.clear.textContent}`);
         }
 
         this.actions = document.createElement('div');
@@ -94,50 +101,117 @@ export default class extends Controller {
         }
     }
 
-    get id() {
-        return this.sourceTarget.value.trim();
+    get ids() {
+        return this.sourceTarget.value
+            .split(',')
+            .map((id) => id.trim())
+            .filter((id) => id !== '');
     }
 
     /** Writes the choice into the field — the one place that does. */
-    pick(id) {
-        this.sourceTarget.value = id;
+    set ids(values) {
+        /* A repeated id would be one entry the core keeps and one the editor cannot remove. */
+        this.sourceTarget.value = [...new Set(values)].join(',');
         this.sourceTarget.dispatchEvent(new Event('change', { bubbles: true }));
         this.render();
-        this.close();
+    }
+
+    /**
+     * One entry was chosen in the overlay.
+     *
+     * A SINGLE FIELD CLOSES, A LIST STAYS OPEN. Choosing is finished for the one-image field the
+     * moment it happened; for a list the overlay is the place the editor assembles several, so
+     * closing after the first would make every further image another round trip. Already chosen
+     * entries toggle off, which is the only way to correct a misclick without leaving.
+     */
+    pick(id) {
+        if (!this.multipleValue) {
+            this.ids = [id];
+            this.close();
+            return;
+        }
+
+        this.ids = this.ids.includes(id)
+            ? this.ids.filter((chosen) => chosen !== id)
+            : [...this.ids, id];
+
+        this.mark();
     }
 
     render() {
-        this.preview.replaceChildren();
-        this.clear.hidden = this.id === '';
+        const chosen = this.ids;
 
-        if (this.id === '') {
+        this.preview.replaceChildren();
+        this.clear.hidden = chosen.length === 0;
+
+        if (chosen.length === 0) {
             const empty = document.createElement('p');
             empty.className = 'admin-form__file-empty';
-            empty.textContent = 'Kein Bild gewählt';
+            empty.textContent = this.multipleValue ? 'Keine Bilder gewählt' : 'Kein Bild gewählt';
             this.preview.append(empty);
+            this.mark();
+            return;
+        }
+
+        if (!this.multipleValue) {
+            this.preview.append(this.thumb(chosen[0]));
+            this.mark();
             return;
         }
 
         /*
-         * THE PREVIEW OF THE CHOSEN FILE IS BUILT FROM THE ID ALONE, because the field may hold
-         * an id this module never saw — one typed in by hand, or one that came with the record.
-         * The entry's own addresses are only known while the overlay is open, so the chosen
-         * preview asks the same core route the listing asks, and the name segment is cosmetic
-         * (Schema-Vertrag 8.1).
-         *
-         * THE SMALL VERSION FIRST, THE STORED FILE SECOND, THE BARE ID LAST. Whether the
-         * configured size exists cannot be answered here or on the server (Schema-Vertrag L25),
-         * and a file that is not an image has no small version at all — so each step is tried
-         * and the next one answers its failure. Starting with the stored file instead would pull
-         * a full-resolution photo into a form for a thumbnail-sized box.
+         * THE CHOSEN LIST IS A LIST, NOT A ROW OF IMAGES. Each entry needs its own remove
+         * button, and the order shown is the order the field holds — which is the order the core
+         * will store for a sortable field (`MultifileType::toDatabase()` counts `sorting` up as
+         * it walks the posted ids).
          */
+        const list = document.createElement('ul');
+        list.className = 'admin-form__file-list';
+
+        for (const id of chosen) {
+            const item = document.createElement('li');
+            item.className = 'admin-form__file-item';
+            item.append(this.thumb(id));
+
+            const drop = document.createElement('button');
+            drop.type = 'button';
+            drop.className = 'admin-form__file-drop';
+            drop.textContent = '×';
+            drop.setAttribute('aria-label', `${this.name === '' ? 'Bild' : this.name} — ${id} entfernen`);
+            drop.addEventListener('click', () => {
+                this.ids = this.ids.filter((kept) => kept !== id);
+            });
+
+            item.append(drop);
+            list.append(item);
+        }
+
+        this.preview.append(list);
+        this.mark();
+    }
+
+    /**
+     * The thumbnail of one chosen id.
+     *
+     * IT IS BUILT FROM THE ID ALONE, because the field may hold an id this module never saw —
+     * one typed in by hand, or one that came with the record. The entry's own addresses are only
+     * known while the overlay is open, so this asks the same core route the listing asks, and
+     * the name segment is cosmetic (Schema-Vertrag 8.1).
+     *
+     * THE SMALL VERSION FIRST, THE STORED FILE SECOND, THE BARE ID LAST. Whether the configured
+     * size exists cannot be answered here or on the server (Schema-Vertrag L25), and a file that
+     * is not an image has no small version at all — so each step is tried and the next one
+     * answers its failure. Starting with the stored file instead would pull a full-resolution
+     * photo into a thumbnail-sized box.
+     */
+    thumb(id) {
         const steps = [];
 
         if (this.aliasValue !== '') {
-            steps.push(`/file/get/${encodeURIComponent(this.id)}/s-${encodeURIComponent(this.aliasValue)}/datei`);
+            steps.push(`/file/get/${encodeURIComponent(id)}/s-${encodeURIComponent(this.aliasValue)}/datei`);
         }
 
-        steps.push(`/file/get/${encodeURIComponent(this.id)}/datei`);
+        steps.push(`/file/get/${encodeURIComponent(id)}/datei`);
 
         const img = document.createElement('img');
         img.className = 'admin-form__file-image';
@@ -151,16 +225,30 @@ export default class extends Controller {
                 return;
             }
 
-            img.remove();
-            const fallback = document.createElement('p');
+            const fallback = document.createElement('span');
             fallback.className = 'admin-form__file-empty';
-            fallback.textContent = this.id;
-            this.preview.append(fallback);
+            fallback.textContent = id;
+            img.replaceWith(fallback);
         });
 
         img.src = steps.shift();
 
-        this.preview.append(img);
+        return img;
+    }
+
+    /** Marks the entries of an open overlay that are already chosen. */
+    mark() {
+        if (this.grid === undefined) {
+            return;
+        }
+
+        const chosen = this.ids;
+
+        for (const button of this.grid.querySelectorAll('.admin-picker__file')) {
+            const picked = chosen.includes(button.dataset.id);
+            button.classList.toggle('admin-picker__file--chosen', picked);
+            button.setAttribute('aria-pressed', picked ? 'true' : 'false');
+        }
     }
 
     open() {
@@ -197,7 +285,7 @@ export default class extends Controller {
         const done = document.createElement('button');
         done.type = 'button';
         done.className = 'admin-picker__close';
-        done.textContent = 'Abbrechen';
+        done.textContent = this.multipleValue ? 'Fertig' : 'Abbrechen';
         done.addEventListener('click', () => this.close());
 
         const head = document.createElement('div');
@@ -293,12 +381,15 @@ export default class extends Controller {
 
         if (count === 0) {
             this.status.textContent = 'In diesem Ordner liegt keine Datei.';
+            this.mark();
             return;
         }
 
         this.status.textContent = answer.pages > 1
             ? `Seite ${answer.page} von ${answer.pages} — ${answer.total} Dateien`
             : `${count} ${count === 1 ? 'Datei' : 'Dateien'}`;
+
+        this.mark();
     }
 
     entry(file) {
@@ -308,7 +399,14 @@ export default class extends Controller {
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'admin-picker__file';
+        /* The id lives on the element so `mark()` can find it again without a second list. */
+        button.dataset.id = file.id;
         button.addEventListener('click', () => this.pick(file.id));
+
+        if (this.multipleValue) {
+            /* A list toggles, so the entry is a switch and says so. */
+            button.setAttribute('aria-pressed', 'false');
+        }
 
         if (file.preview === null) {
             const badge = document.createElement('span');
