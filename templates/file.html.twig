@@ -1,0 +1,92 @@
+{#
+    One file on a page of its own: its facts, its preview and its public address (003-003-0002).
+
+    IT IS A SECOND ROUTE ON THE SAME MOUNT, not a view of its own area — `AdminManager` declares
+    why (ADR 0022). For this template that only matters in one place: every address it prints
+    comes ready-made from `FileController`, the rule the listing follows for the same reason.
+
+    THE WAY BACK IS ALWAYS THERE. It leads into the folder the file lies in, or to the listing
+    root when it lies outside the folders — derived from the record and not from history, so it
+    works for somebody who arrived from a bookmark.
+
+    THE FOLDER LINE HAS THREE REASONS TO CARRY NO LINK, and the missing right is checked first.
+    Measured, after the other order was written here: without the right to read folders the core
+    leaves the masked join empty, so a file inside a folder looks exactly like one outside them —
+    and this page said „Ausserhalb der Ordner" about it. A missing right takes an answer away
+    (ADR 0019); it must not produce a different, wrong one.
+
+    THE PREVIEW IS EITHER AN IMAGE OR A LABEL, never an empty box — the listing's rule, and for
+    its reason: a preview that failed to load and a file that was never going to have one must
+    not look the same. `admin/file-preview` swaps a missing derivative for the original, because
+    whether the configured alias exists cannot be found out from the package (Schema-Vertrag L25).
+
+    THE PUBLIC ADDRESS IS STATED, AND SO IS WHAT IT MEANS. The core serves every stored file
+    under this route without asking for a login (Schema-Vertrag L23). An editor who hands the
+    address on should know that, and a page that shows the address while staying silent about it
+    would be the worse of the two options.
+#}{% extends 'layout.html.twig' %}
+
+{% block bodyAttributes %} class="admin"{% endblock %}
+
+{% block content %}
+<main class="admin__main admin-file">
+    <nav class="admin-files__trail" aria-label="Ordnerpfad">
+        <a class="admin-files__trail-link" href="{{ rootUrl }}">Alle Dateien</a>
+{% if folderUrl %}
+        <span class="admin-files__trail-separator" aria-hidden="true">/</span>
+        <a class="admin-files__trail-link" href="{{ folderUrl }}">{{ folderTitle }}</a>
+{% endif %}
+        <span class="admin-files__trail-separator" aria-hidden="true">/</span>
+        <span class="admin-files__trail-link admin-files__trail-link--current" aria-current="true">{{ name }}</span>
+    </nav>
+
+    <h1>{{ name }}</h1>
+
+    <div class="admin-file__layout">
+        <div class="admin-file__preview-box">
+{% if preview %}
+            <img class="admin-file__preview" src="{{ preview }}" alt=""
+                 decoding="async"
+                 data-controller="admin-file-preview"
+                 data-admin-file-preview-fallback-value="{{ original }}">
+{% else %}
+            <span class="admin-file__preview admin-file__preview--badge"
+                  role="img" aria-label="{{ type }}">{{ badge }}</span>
+{% endif %}
+        </div>
+
+        <dl class="admin-file__facts">
+            <dt class="admin-file__term">Name</dt>
+            <dd class="admin-file__value">{{ name }}</dd>
+
+            <dt class="admin-file__term">Ordner</dt>
+            <dd class="admin-file__value">
+{% if folderUrl %}
+                <a href="{{ folderUrl }}">{{ folderTitle }}</a>
+{% elseif not mayReadFolders %}
+                <span class="admin-file__muted">Nicht einsehbar — es fehlt das Recht, Ordner zu lesen.</span>
+{% elseif isRoot %}
+                Ausserhalb der Ordner
+{% else %}
+                <span class="admin-file__muted">Der Ordner ist nicht mehr vorhanden.</span>
+{% endif %}
+            </dd>
+
+            <dt class="admin-file__term">Typ</dt>
+            <dd class="admin-file__value">{{ type }}</dd>
+
+            <dt class="admin-file__term">Größe</dt>
+            <dd class="admin-file__value">{{ size }}</dd>
+
+            <dt class="admin-file__term">Hochgeladen</dt>
+            <dd class="admin-file__value">{{ created }}</dd>
+
+            <dt class="admin-file__term">Adresse der Datei</dt>
+            <dd class="admin-file__value">
+                <a class="admin-file__address" href="{{ original }}">{{ original }}</a>
+                <span class="admin-file__muted">Diese Adresse ist ohne Anmeldung abrufbar.</span>
+            </dd>
+        </dl>
+    </div>
+</main>
+{% endblock %}

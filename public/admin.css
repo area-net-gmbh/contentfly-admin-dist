@@ -1235,3 +1235,96 @@ li {
     background: var(--admin-danger-surface);
     color: var(--admin-danger-text);
 }
+
+/*
+ * THE NAME LEADS TO THE FILE'S OWN PAGE (story 003-003-0002). It is the only link in the row, so
+ * it takes the accent colour and keeps its underline — in a table of plain cells an unmarked
+ * link is one nobody tries.
+ */
+.admin-files__name {
+    color: var(--admin-accent);
+}
+
+/*
+ * THE DETAIL PAGE (story 003-003-0002).
+ *
+ * PREVIEW BESIDE THE FACTS ON A WIDE SCREEN, ABOVE THEM ON A NARROW ONE. Same shape as the
+ * file manager's own layout, and for the same reason: the facts are a list and read fine in one
+ * column, while the preview is the thing someone came to look at.
+ */
+.admin-file__layout {
+    display: grid;
+    gap: 1.5rem;
+    align-items: start;
+    max-width: 48rem;
+}
+
+@media (min-width: 48rem) {
+    .admin-file__layout {
+        grid-template-columns: 12rem 1fr;
+    }
+}
+
+/*
+ * THE PREVIEW BOX HAS ITS SIZE BEFORE IT HAS CONTENT, the rule the table cell follows: a
+ * derivative the core builds on first request arrives late, and the facts beside it must not
+ * jump while it does.
+ */
+.admin-file__preview-box {
+    width: 12rem;
+    height: 12rem;
+}
+
+.admin-file__preview {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: 3px;
+    /* Behind a transparent or still-loading image, so the box is never a hole in the page. */
+    background: var(--admin-rule);
+    object-fit: contain;
+}
+
+.admin-file__preview--badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    color: var(--admin-muted);
+}
+
+.admin-file__facts {
+    margin: 0;
+}
+
+.admin-file__term {
+    margin: 0.75rem 0 0;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--admin-muted);
+}
+
+.admin-file__value {
+    margin: 0.125rem 0 0;
+}
+
+/*
+ * THE ADDRESS WRAPS INSTEAD OF OVERFLOWING. It is one unbroken string and can be long; a page
+ * that scrolls sideways because of it would hide the facts underneath.
+ */
+.admin-file__address {
+    display: block;
+    overflow-wrap: anywhere;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.875rem;
+}
+
+.admin-file__muted {
+    display: block;
+    color: var(--admin-muted);
+    font-size: 0.875rem;
+}

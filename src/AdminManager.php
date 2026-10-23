@@ -463,9 +463,23 @@ final class AdminManager
          * `Permission::isReadable()` about the `auth.user` that only a guarded main request
          * sets.
          */
+        /*
+         * THE DETAIL VIEW IS A SECOND ROUTE ON THIS MOUNT, not a mount of its own (ADR 0022).
+         * `RouteManager` keys its providers by mount path, so a second
+         * `mount($this->prefix.'/files', …)` would replace `FileController` instead of adding to
+         * it — silently, which is the failure ADR 0020 already paid for once.
+         *
+         * `match()` LIKE THE LISTING ABOVE: routes within one provider are keyed by their path,
+         * so a `post()` written beside a `get()` on the same path would replace it. The metadata
+         * form of story 003-003-0004 posts back to this address.
+         *
+         * `{id}` MATCHES ANY SINGLE SEGMENT, placeholders cannot be typed here (ADR 0007), so
+         * `detailAction()` answers 404 for a value that is not a record id.
+         */
         $this->app['routeManager']
             ->mount($this->prefix.'/files', FileController::class)
-            ->match('', true, 'filesAction');
+            ->match('', true, 'filesAction')
+            ->match('{id}', true, 'detailAction');
 
         $this->app['routeManager']
             ->mount($this->prefix.'/_asset', AssetController::class)

@@ -11,6 +11,7 @@ use Areanet\ContentflyAdmin\Schema\Envelope;
 use Areanet\ContentflyAdmin\View\MenuBuilder;
 use Areanet\ContentflyAdmin\View\TemplateRenderer;
 use Areanet\PIM\Classes\Api;
+use Areanet\PIM\Classes\Exceptions\ContentflyException;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -244,7 +245,7 @@ final class FileController
 
         $base = $manager->getPrefix().'/files/';
 
-        $files = self::rows($records, $manager->getThumbnailAlias());
+        $files = self::rows($records, $manager->getThumbnailAlias(), $base);
 
         /*
          * THE FALLBACK IS THE BROWSER'S, AND IT HAS TO BE (Schema-Vertrag L25).
@@ -344,6 +345,121 @@ final class FileController
         }
 
         return $response;
+    }
+
+    /**
+     * One file on a page of its own: its facts, its preview and its public address.
+     *
+     * A SECOND ROUTE ON THE EXISTING MOUNT, never a mount of its own (ADR 0022). The reasoning
+     * sits in `AdminManager::mountRoutes()`, where the route is declared.
+     *
+     * A NON-NUMERIC OR UNKNOWN ID IS A 404, the stance `FormController::load()` takes for the
+     * same situation: a hand-typed address must not reach the core's debug page, and an empty
+     * page would read like a file that exists and holds nothing.
+     *
+     * THE FOLDER IS RESOLVED THROUGH THE TREE and not through the record's nested folder object.
+     * The tree is already the one place in this controller that knows a folder's title, and it
+     * is asked for only when it may be read — without that right the folder line is left out
+     * and the rest of the page stays, the additive masking of ADR 0019. The listing above drops
+     * its whole column on the same condition.
+     */
+    public function detailAction(Request $request, string $id): Response
+    {
+        if (($refusal = $this->guard()) !== null) {
+            return $refusal;
+        }
+
+        $manager = $this->app[AdminManager::CONTAINER_KEY];
+
+        if (!in_array(self::ENTITY_FILE, $manager->getEntities(), true)) {
+            return new Response('', 404);
+        }
+
+        if (!$this->mayRead(self::ENTITY_FILE)) {
+            return $this->accessDeniedPage(self::ENTITY_FILE);
+        }
+
+        /*
+         * THE ID IS NOT CHECKED FOR A FORMAT, and that is deliberate — measured, after the
+         * opposite was written here first.
+         *
+         * `Base::$id` is mapped with `APPCMS_ID_TYPE`/`APPCMS_ID_STRATEGY`, so the form of an id
+         * is the installation's decision: the harness runs on UUIDs, a project on `AUTO` gets
+         * integers. A `ctype_digit()` guard would have answered 404 for every real file here,
+         * and a UUID pattern would do the same the other way round. `FormController` passes its
+         * `{id}` through for the same reason.
+         *
+         * What is left is the lookup itself: an id that matches no record is `null`, one the
+         * editor may not read throws — both become the 404 below.
+         */
+
+        $api = new Api($this->app, $request);
+
+        try {
+            $record = $api->getSingle(self::ENTITY_FILE, $id);
+        } catch (ContentflyException $denied) {
+            /*
+             * `getSingle()` THROWS FOR A RECORD THE EDITOR MAY NOT READ, and that is caught here
+             * rather than turned into a 403: the read permission on the entity was answered
+             * above, so what is left is the core's per-record rule (ADR 0019) — for the reader
+             * the file is simply not there.
+             */
+            return new Response('', 404);
+        }
+
+        if (!is_object($record)) {
+            return new Response('', 404);
+        }
+
+        $base = $manager->getPrefix().'/files/';
+
+        $name = self::text($record->name ?? null);
+        $type = self::text($record->type ?? null);
+
+        $mayReadFolders = $this->mayRead(self::ENTITY_FOLDER);
+        $tree           = $mayReadFolders ? $api->getTree2(self::ENTITY_FOLDER) : null;
+
+        $folderId = self::folderId($record);
+        $node     = ($tree !== null && $folderId !== null) ? self::find($tree, $folderId) : null;
+
+        $preview = self::preview($id, $name, $type, $manager->getThumbnailAlias());
+
+        $controllers = $preview === null ? array() : array('admin-file-preview' => 'admin/file-preview');
+
+        $html = $this->app[TemplateRenderer::CONTAINER_KEY]->render('file.html.twig', array(
+            'title'      => $name.' — '.$manager->getTitle(),
+            'stylesheet' => $manager->assetUrl('admin.css'),
+            'importmap'  => Importmap::scriptTag($manager),
+            'menu'       => $this->app[MenuBuilder::CONTAINER_KEY]->build(),
+            'logoutUrl'  => $manager->getPrefix().'/logout',
+            'controllers' => $controllers,
+            'rootUrl'     => $base,
+            'name'        => $name === '' ? self::EMPTY_CELL : $name,
+            'type'        => $type === '' ? self::EMPTY_CELL : $type,
+            'size'        => self::humanSize($record->size ?? null),
+            'created'     => self::moment($record->created ?? null),
+            'preview'     => $preview,
+            'badge'       => self::badge($type),
+            'original'    => self::original($id, $name),
+            /*
+             * `null` FOR BOTH MEANS "SAY NOTHING ABOUT THE FOLDER". It is the same value for two
+             * different reasons — the file lies outside the folders, or the editor may not read
+             * them — and the template says which, because only here is the difference known.
+             */
+            'folderTitle' => $node === null ? null : (($node['title'] ?? '') === '' ? self::EMPTY_CELL : (string) $node['title']),
+            'folderUrl'   => $node === null ? null : self::url($base, (string) $node['id'], 1),
+            'mayReadFolders' => $mayReadFolders,
+            /*
+             * `isRoot` IS ONLY CLAIMED WHEN THE FOLDERS MAY BE READ, and that is measured rather
+             * than assumed: without the right, `toValueObject()` leaves the masked join empty, so
+             * a file **inside** a folder arrives with no folder at all. Derived from `$folderId`
+             * alone the page stated „Ausserhalb der Ordner" for it — an untruth, and the one
+             * reading a missing right must never produce.
+             */
+            'isRoot'         => $mayReadFolders && $folderId === null,
+        ));
+
+        return new Response($html, 200, array('Content-Type' => 'text/html; charset=UTF-8'));
     }
 
     /**
@@ -843,7 +959,7 @@ final class FileController
     }
 
     /** One row per file, formatted — the template receives no raw values to format itself. */
-    private static function rows(array $records, string $alias): array
+    private static function rows(array $records, string $alias, string $base): array
     {
         $rows = array();
 
@@ -862,6 +978,13 @@ final class FileController
                 'preview'  => self::preview($id, $name, $type, $alias),
                 'original' => self::preview($id, $name, $type, null),
                 'badge'    => self::badge($type),
+                /*
+                 * THE DETAIL ADDRESS IS BUILT HERE, like every other address of this view: a
+                 * template that concatenates URLs is a second place that has to know the prefix.
+                 * A row without a usable id gets `null` and the template leaves the name
+                 * unlinked rather than pointing at the listing itself.
+                 */
+                'detailUrl' => $id === '' ? null : $base.rawurlencode($id),
             );
         }
 
@@ -891,6 +1014,65 @@ final class FileController
         }
 
         return self::CORE_FILE_ROUTE.'/'.rawurlencode($id).'/s-'.rawurlencode($alias).'/'.$tail;
+    }
+
+    /**
+     * The stored file's own address, whatever its type.
+     *
+     * UNLIKE `preview()` THIS DOES NOT GATE ON THE TYPE, and the difference is the whole point.
+     * A size request for a non-image answers 500 (Schema-Vertrag 8.2), which is why the
+     * derivative path asks about the type first — but the plain route serves every stored file
+     * (8.1), so the detail page can state the address of a PDF exactly as it does of a JPEG.
+     *
+     * THE TRAILING SEGMENT IS COSMETIC, as it is for the derivative: the record is found by
+     * `{id}` alone, the name only makes the address readable.
+     */
+    private static function original(string $id, string $name): string
+    {
+        $tail = $name === '' ? 'datei' : rawurlencode($name);
+
+        return self::CORE_FILE_ROUTE.'/'.rawurlencode($id).'/'.$tail;
+    }
+
+    /** One value of a record as a plain string, or `''` for anything that is not one. */
+    private static function text($value): string
+    {
+        return is_scalar($value) ? (string) $value : '';
+    }
+
+    /**
+     * A point in time as something a person reads.
+     *
+     * A `datetime` DOES NOT ARRIVE AS A SCALAR. `toValueObject()` hands it over as an array of
+     * `LOCAL`, `LOCAL_TIME` and `ISO8601` (`Types/DatetimeType.php`), and printing that in a
+     * template is a runtime error in the place hardest to see coming — `ListController::cell()`
+     * normalises the same shape at its own edge.
+     */
+    private static function moment($value): string
+    {
+        if (is_array($value)) {
+            $local = $value['LOCAL'] ?? null;
+
+            return is_scalar($local) ? (string) $local : self::EMPTY_CELL;
+        }
+
+        return is_scalar($value) && (string) $value !== '' ? (string) $value : self::EMPTY_CELL;
+    }
+
+    /**
+     * The id of the folder a record lies in, or `null` when it lies outside the folders.
+     *
+     * IT TAKES BOTH SHAPES ON PURPOSE. A `ManyToOne` comes back from `toValueObject()` as a
+     * nested object, but the nesting stops at `DB_NESTED_LEVELS` and then collapses to the id —
+     * reading only one of the two would work until a project raises or lowers that setting.
+     */
+    private static function folderId(object $record): ?string
+    {
+        $folder = $record->folder ?? null;
+
+        $id = is_object($folder) ? ($folder->id ?? null) : $folder;
+
+        return is_scalar($id) && (string) $id !== '' ? (string) $id : null;
     }
 
     /**

@@ -39,6 +39,10 @@
     request, so a folder of fifty images would otherwise have the browser ask for fifty of them at
     once. Deferring the ones below the fold spreads that over the scrolling instead.
 
+    THE NAME LEADS TO THE FILE'S OWN PAGE (003-003-0002). The address comes ready-made from
+    `FileController::rows()`, like every other URL here; a row without a usable id keeps its name
+    unlinked rather than pointing back at this listing.
+
     THE FALLBACK TO THE ORIGINAL IS THE BROWSER'S JOB. Whether the configured alias names an
     existing row cannot be found out from the package (Schema-Vertrag L25), so the derivative is
     simply requested and `admin/file-preview` swaps in `file.original` if it does not arrive.
@@ -175,7 +179,13 @@
                                   role="img" aria-label="{{ file.type }}">{{ file.badge }}</span>
 {% endif %}
                         </td>
-                        <td class="admin-files__cell">{{ file.name }}</td>
+                        <td class="admin-files__cell">
+{% if file.detailUrl %}
+                            <a class="admin-files__name" href="{{ file.detailUrl }}">{{ file.name }}</a>
+{% else %}
+                            {{ file.name }}
+{% endif %}
+                        </td>
                         <td class="admin-files__cell">{{ file.type }}</td>
                         <td class="admin-files__cell admin-files__cell--size">{{ file.size }}</td>
 {% if mayWrite or mayDelete %}
