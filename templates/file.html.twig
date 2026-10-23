@@ -20,6 +20,17 @@
     not look the same. `admin/file-preview` swaps a missing derivative for the original, because
     whether the configured alias exists cannot be found out from the package (Schema-Vertrag L25).
 
+    THE DERIVATIVES ARE LISTED WITHOUT A `1x`/`2x` SEGMENT (003-003-0003). Measured: both default
+    `ThumbnailSetting` rows carry `isResponsive = 0`, so those two addresses answer 500 — the form
+    without the segment is the one ADR 0020 picked for the preview. `admin/file-variant` measures
+    each entry in the browser and names the ones that did not arrive, because neither the
+    existing aliases nor their nominal sizes are readable from the package (Schema-Vertrag L25).
+
+    THE EMPTY LIST IS NOT AN ERROR AND DOES NOT LOOK LIKE ONE. Three different cases: the project
+    configured no aliases — then the whole block is absent; the file is not one of the three
+    derivable types — then one sentence says so; or an entry failed, which the module says at the
+    entry. `FileController` decides which of the first two applies.
+
     THE PUBLIC ADDRESS IS STATED, AND SO IS WHAT IT MEANS. The core serves every stored file
     under this route without asking for a login (Schema-Vertrag L23). An editor who hands the
     address on should know that, and a page that shows the address while staying silent about it
@@ -88,5 +99,38 @@
             </dd>
         </dl>
     </div>
+
+{% if hasAliases %}
+    <section class="admin-file__variants" aria-labelledby="admin-file-variants">
+        <h2 class="admin-file__variants-heading" id="admin-file-variants">Verkleinerte Fassungen</h2>
+{% if not isThumbnailable %}
+        <p class="admin-files__empty">
+            Für diesen Dateityp entstehen keine verkleinerten Fassungen — die gibt es nur für
+            JPEG, GIF und PNG.
+        </p>
+{% else %}
+        <ul class="admin-file__variant-list">
+{% for variant in variants %}
+            <li class="admin-file__variant" data-controller="admin-file-variant">
+                <a class="admin-file__variant-link" href="{{ variant.url }}">
+                    <img class="admin-file__variant-image" src="{{ variant.url }}" alt=""
+                         decoding="async" data-admin-file-variant-target="image">
+                </a>
+                <span class="admin-file__variant-alias">{{ variant.alias }}</span>
+                <span class="admin-file__variant-size" data-admin-file-variant-target="size" hidden></span>
+                <span class="admin-file__variant-missing" data-admin-file-variant-target="missing" hidden>
+                    Diese Fassung gibt es in dieser Installation nicht.
+                </span>
+            </li>
+{% endfor %}
+        </ul>
+        <p class="admin-file__variants-note">
+            Diese Adressen sind ebenfalls ohne Anmeldung abrufbar. Die verkleinerte Fassung
+            entsteht beim ersten Abruf, falls sie noch fehlt — bei mehreren Fassungen also
+            mehrere Verkleinerungen auf einmal.
+        </p>
+{% endif %}
+    </section>
+{% endif %}
 </main>
 {% endblock %}

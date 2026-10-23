@@ -71,6 +71,7 @@ final class AdminManager
         'entities'  => [],
         'assetPath' => '',
         'thumbnailAlias' => 'pim_list',
+        'thumbnailAliases' => [],
         'uploadAccept'   => '',
     ];
 
@@ -107,6 +108,9 @@ final class AdminManager
     /** Alias of the `PIM\ThumbnailSetting` row the file manager's previews are built from. */
     private string $thumbnailAlias;
 
+    /** @var list<string> Aliases the file's own page lists; empty means it lists none. */
+    private array $thumbnailAliases;
+
     /** `accept` value the upload offers the browser; empty means no pre-check at all. */
     private string $uploadAccept;
 
@@ -133,8 +137,9 @@ final class AdminManager
         $this->title     = self::validateTitle($options['title']);
         $this->entities  = self::validateEntities($options['entities']);
         $this->assetPath = self::validateAssetPath($options['assetPath'], $this->prefix);
-        $this->thumbnailAlias = self::validateThumbnailAlias($options['thumbnailAlias']);
-        $this->uploadAccept   = self::validateUploadAccept($options['uploadAccept']);
+        $this->thumbnailAlias   = self::validateThumbnailAlias($options['thumbnailAlias']);
+        $this->thumbnailAliases = self::validateThumbnailAliases($options['thumbnailAliases']);
+        $this->uploadAccept     = self::validateUploadAccept($options['uploadAccept']);
 
         $this->registerServices();
         $this->mountRoutes();
@@ -639,12 +644,19 @@ final class AdminManager
     }
 
     /**
+     * ONE RULE FOR BOTH OPTIONS, AND IT CARRIES THE OPTION'S NAME. `thumbnailAliases` validates
+     * every entry through here, so a message hard-coded to `thumbnailAlias` would send a project
+     * looking at the wrong line of its configuration.
+     *
      * @param mixed $alias
      */
-    private static function validateThumbnailAlias($alias): string
+    private static function validateThumbnailAlias($alias, string $option = 'thumbnailAlias'): string
     {
         if (!is_string($alias) || $alias === '') {
-            throw new \InvalidArgumentException('The option "thumbnailAlias" must be a non-empty string, for example "pim_list".');
+            throw new \InvalidArgumentException(sprintf(
+                'The option "%s" must name a non-empty alias, for example "pim_list".',
+                $option
+            ));
         }
 
         /*
@@ -656,12 +668,65 @@ final class AdminManager
          */
         if (preg_match('#^[A-Za-z0-9_-]+$#', $alias) !== 1) {
             throw new \InvalidArgumentException(sprintf(
-                'The thumbnail alias "%s" must consist of letters, digits, underscores and hyphens only.',
-                $alias
+                'The alias "%s" in option "%s" must consist of letters, digits, underscores and hyphens only.',
+                $alias,
+                $option
             ));
         }
 
         return $alias;
+    }
+
+    /**
+     * The derivatives a file's own page lists.
+     *
+     * A SECOND OPTION AND NOT A WIDENED `thumbnailAlias` (ADR 0022). The two answer different
+     * questions — which single derivative the listing shows as a thumbnail, and which ones the
+     * detail page enumerates. Folded into one list, the listing's thumbnail would hang on the
+     * order of a list maintained for the detail page: reordering there would change the
+     * overview without anybody asking for it.
+     *
+     * EMPTY BY DEFAULT, AND THE DETAIL PAGE THEN LISTS NOTHING. Which `PIM\ThumbnailSetting`
+     * rows an installation has cannot be found out from here (Schema-Vertrag L25), so a
+     * non-empty default would be a guess — and a guessed alias produces a broken entry on a
+     * page whose whole job is to tell the editor what exists.
+     *
+     * @return list<string>
+     */
+    public function getThumbnailAliases(): array
+    {
+        return $this->thumbnailAliases;
+    }
+
+    /**
+     * @param mixed $aliases
+     *
+     * @return list<string>
+     */
+    private static function validateThumbnailAliases($aliases): array
+    {
+        if (!is_array($aliases)) {
+            throw new \InvalidArgumentException('The option "thumbnailAliases" must be a list of aliases, for example ["pim_list", "pim_small"]. An empty list means the detail page lists no derivatives.');
+        }
+
+        $checked = array();
+
+        foreach ($aliases as $alias) {
+            /*
+             * THE SAME RULE AS THE SINGLE ALIAS, and it is validated for the same reason: the
+             * value becomes a path segment of an address this package builds, so a slash or a
+             * dot-dot would travel through the URL before the core ever failed to find the row
+             * (ADR 0007).
+             */
+            $checked[] = self::validateThumbnailAlias($alias, 'thumbnailAliases');
+        }
+
+        /*
+         * DUPLICATES ARE DROPPED RATHER THAN LISTED TWICE. The same alias twice is a typo in the
+         * project's configuration, and two identical entries on the page would each request the
+         * same derivative — the editor would read it as two sizes that happen to match.
+         */
+        return array_values(array_unique($checked));
     }
 
     /**

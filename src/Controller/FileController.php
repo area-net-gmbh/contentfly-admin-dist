@@ -424,7 +424,23 @@ final class FileController
 
         $preview = self::preview($id, $name, $type, $manager->getThumbnailAlias());
 
-        $controllers = $preview === null ? array() : array('admin-file-preview' => 'admin/file-preview');
+        $aliases  = $manager->getThumbnailAliases();
+        $variants = self::variants($id, $name, $type, $aliases);
+
+        $controllers = array();
+
+        if ($preview !== null) {
+            $controllers['admin-file-preview'] = 'admin/file-preview';
+        }
+
+        /*
+         * THE VARIANT MODULE IS REGISTERED EXACTLY WHEN THERE IS A LIST, the rule the listing
+         * follows for its own two modules: registering it for a page without entries would load
+         * a module whose elements never exist.
+         */
+        if ($variants !== array()) {
+            $controllers['admin-file-variant'] = 'admin/file-variant';
+        }
 
         $html = $this->app[TemplateRenderer::CONTAINER_KEY]->render('file.html.twig', array(
             'title'      => $name.' — '.$manager->getTitle(),
@@ -440,6 +456,14 @@ final class FileController
             'created'     => self::moment($record->created ?? null),
             'preview'     => $preview,
             'badge'       => self::badge($type),
+            'variants'    => $variants,
+            /*
+             * THE TWO EMPTY CASES ARE TOLD APART. No aliases configured and a file that cannot
+             * have derivatives are different facts, and only here is it known which applies —
+             * the template says the fitting sentence or nothing at all.
+             */
+            'hasAliases'      => $aliases !== array(),
+            'isThumbnailable' => in_array($type, self::THUMBNAILABLE, true),
             'original'    => self::original($id, $name),
             /*
              * `null` FOR BOTH MEANS "SAY NOTHING ABOUT THE FOLDER". It is the same value for two
@@ -1032,6 +1056,44 @@ final class FileController
         $tail = $name === '' ? 'datei' : rawurlencode($name);
 
         return self::CORE_FILE_ROUTE.'/'.rawurlencode($id).'/'.$tail;
+    }
+
+    /**
+     * One entry per configured alias, or an empty list when there can be none.
+     *
+     * NOTHING AT ALL FOR A FILE THAT IS NOT ONE OF THE THREE DERIVABLE TYPES. The core answers a
+     * size request for a PDF with a `FileNotFoundException` and so a 500 (Schema-Vertrag 8.2) —
+     * not asking is the whole point, exactly as it is for the listing's thumbnail (ADR 0020).
+     *
+     * NO `1x`/`2x` SEGMENT, AND THAT IS MEASURED RATHER THAN CHOSEN FOR TIDINESS. Both default
+     * `ThumbnailSetting` rows carry `isResponsive = 0`, so no variant derivative is ever
+     * produced for them: measured against the running harness, `s-pim_list/1x/…` **and**
+     * `s-pim_list/2x/…` both answer `contentfly_general_filesize_not_found` with a 500. Whether
+     * an installation has a responsive row cannot be found out from here (Schema-Vertrag L25), so
+     * offering the two addresses would have put two reliably broken entries under every alias.
+     * The form without the segment is the one ADR 0020 picked for the preview, for this reason.
+     *
+     * @param list<string> $aliases
+     *
+     * @return list<array{alias: string, url: string}>
+     */
+    private static function variants(string $id, string $name, string $type, array $aliases): array
+    {
+        if (!in_array($type, self::THUMBNAILABLE, true)) {
+            return array();
+        }
+
+        $variants = array();
+
+        foreach ($aliases as $alias) {
+            $url = self::preview($id, $name, $type, $alias);
+
+            if ($url !== null) {
+                $variants[] = array('alias' => $alias, 'url' => $url);
+            }
+        }
+
+        return $variants;
     }
 
     /** One value of a record as a plain string, or `''` for anything that is not one. */

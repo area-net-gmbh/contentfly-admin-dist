@@ -47,6 +47,7 @@ final class Importmap
         'admin/list-search'  => 'controllers/list_search_controller.js',
         'admin/list-select'  => 'controllers/list_select_controller.js',
         'admin/file-preview' => 'controllers/file_preview_controller.js',
+        'admin/file-variant' => 'controllers/file_variant_controller.js',
         'admin/upload'       => 'controllers/upload_controller.js',
     );
 
