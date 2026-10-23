@@ -1401,3 +1401,32 @@ li {
     color: var(--admin-muted);
     font-size: 0.875rem;
 }
+
+/*
+ * THE METADATA FORM ON A FILE'S PAGE (story 003-003-0004).
+ *
+ * IT REUSES THE FORM CLASSES of the record mask rather than bringing its own: label, control,
+ * finding and hint are the same three things they are there, and a second set would drift away
+ * from them at the first change. Only the section around it is local.
+ *
+ * ALL THREE FIELDS SIT IN ONE COLUMN, the alternative text among them. Putting it beside or
+ * below a disclosure is exactly how it ends up unfilled, and it is required wherever the images
+ * are published.
+ */
+.admin-file__meta {
+    max-width: 32rem;
+    margin: 2rem 0 0;
+}
+
+.admin-file__meta-heading {
+    margin: 0 0 0.75rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--admin-muted);
+}
+
+.admin-file__meta-form .admin-form__field {
+    margin: 0 0 1rem;
+}

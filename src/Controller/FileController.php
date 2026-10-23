@@ -8,6 +8,7 @@ use Areanet\ContentflyAdmin\AdminManager;
 use Areanet\ContentflyAdmin\Asset\Importmap;
 use Areanet\ContentflyAdmin\Auth\FormToken;
 use Areanet\ContentflyAdmin\Schema\Envelope;
+use Areanet\ContentflyAdmin\View\FieldError;
 use Areanet\ContentflyAdmin\View\MenuBuilder;
 use Areanet\ContentflyAdmin\View\TemplateRenderer;
 use Areanet\PIM\Classes\Api;
@@ -98,6 +99,38 @@ final class FileController
      * total.
      */
     public const UPLOAD = 'upload';
+
+    /**
+     * The action the metadata form on a file's own page submits (003-003-0004).
+     *
+     * ITS OWN ACTION AND NOT A FOURTH BRANCH OF `write()`. The three write paths of the listing
+     * all return to a folder; this one returns to the file's page and keeps the editor's input
+     * when the core refuses, which a 303 cannot do.
+     */
+    public const METADATA = 'metadata';
+
+    /**
+     * The three fields the metadata form writes, and nothing else.
+     *
+     * `description` IS LEFT OUT ON PURPOSE (ADR 0022). It exists on `PIM\File`, story 003-003
+     * does not ask for it, and a field nobody asked for is one more thing to keep.
+     */
+    public const METADATA_FIELDS = array('alias', 'title', 'altText');
+
+    /**
+     * The column length all three share.
+     *
+     * MEASURED IN THE RUNNING DATABASE, not assumed: `pim_file.alias`, `.title` and `.altText`
+     * are each `varchar(255) NULL`. The 20 characters of `ThumbnailSetting.alias` are a
+     * different column of a different table — that one names a derivative size, this one is the
+     * file's own short name.
+     *
+     * CHECKED HERE RATHER THAN LEFT TO THE DATABASE. The harness runs with
+     * `STRICT_TRANS_TABLES`, so an over-long value is an error and not a silent truncation — but
+     * it surfaces as an unreadable 500, and a sentence at the field is the better answer than
+     * that.
+     */
+    public const METADATA_MAX_LENGTH = 255;
 
     /**
      * The field that asks for a machine-readable answer instead of the redirect.
@@ -380,6 +413,143 @@ final class FileController
         }
 
         /*
+         * A POST IS THE METADATA FORM, A GET IS THE PAGE — the split `filesAction()` makes for
+         * the same reason: the mount is `match()`, so the method is decided here and not by the
+         * router. A GET is never an error on this route.
+         */
+        if ($request->isMethod('POST')) {
+            return $this->saveMetadata($request, $manager, $id);
+        }
+
+        return $this->renderDetail($request, $manager, $id);
+    }
+
+    /**
+     * Saving the three metadata fields of one file (003-003-0004).
+     *
+     * `/api/update` BY SUB-REQUEST, NOT `/file` (ADR 0022). `alias`, `title` and `altText` are
+     * fields of `PIM\File`, and for fields of an entity `/api/update` is the core's write path —
+     * the same one renaming, moving and deleting take. `/file` accepts uploads and nothing else.
+     *
+     * A REFUSAL RE-RENDERS, A SUCCESS REDIRECTS, and the asymmetry is the whole point. The three
+     * write paths of the listing answer every outcome with a 303 because each carries one field;
+     * here three fields are in play, and a redirect would hand the editor back an empty form with
+     * a sentence about what they just lost. So a refusal comes back as the page with the typed
+     * values still in it, and only the success leaves with a 303 — which also keeps a reload from
+     * repeating the write.
+     *
+     * NO `_format=json` BRANCH. The two-sided answer of ADR 0021 exists for the upload, where an
+     * XHR reports per file; this form is submitted by the browser and has no second caller.
+     */
+    private function saveMetadata(Request $request, AdminManager $manager, string $id): Response
+    {
+        $values = array();
+
+        foreach (self::METADATA_FIELDS as $property) {
+            $submitted = $request->request->get($property);
+            $values[$property] = is_string($submitted) ? trim($submitted) : '';
+        }
+
+        if (!FormToken::verify($request)) {
+            /*
+             * NOT A CORE FINDING, SO IT CARRIES NO FIELD — `FormController::save()` takes the
+             * same stance. No single field is wrong here, so the sentence goes above the form.
+             */
+            return $this->renderDetail($request, $manager, $id, $values, array(),
+                'Das Formular ist abgelaufen oder wurde nicht von dieser Seite abgeschickt. Bitte erneut absenden.');
+        }
+
+        if (!$this->mayWrite(self::ENTITY_FILE)) {
+            /*
+             * THE FORM IS NOT RENDERED WITHOUT THIS RIGHT, so getting here means the post did not
+             * come from the page. It is still answered as a page and not as a blank 403, the
+             * stance `write()` takes: the read permission above already said these files are the
+             * editor's business.
+             */
+            return $this->renderDetail($request, $manager, $id, null, array(),
+                'Für diese Änderung fehlt dir die Berechtigung — es wurde nichts geändert.');
+        }
+
+        $tooLong = array();
+
+        foreach ($values as $property => $value) {
+            /*
+             * COUNTED IN CHARACTERS, NOT BYTES. The column counts characters, and `strlen()` on
+             * a German title would refuse a value the database would have taken.
+             */
+            if (mb_strlen($value) > self::METADATA_MAX_LENGTH) {
+                $tooLong[$property] = sprintf(
+                    'Diese Angabe ist zu lang — höchstens %d Zeichen.',
+                    self::METADATA_MAX_LENGTH
+                );
+            }
+        }
+
+        if ($tooLong !== array()) {
+            return $this->renderDetail($request, $manager, $id, $values, $tooLong);
+        }
+
+        /*
+         * AN EMPTY FIELD IS SENT AS THE EMPTY STRING, AND NOT AS `null` — measured, after `null`
+         * was written here first.
+         *
+         * All three columns are nullable, so SQL NULL would be writable in principle. The core
+         * does not pass it on: `Classes/Types/StringType::toDatabase()` answers every empty value
+         * with `$object->setX('')`, so a cleared field becomes `''` whichever of the two is sent.
+         * Sending `null` would therefore claim a distinction the core does not keep, and the next
+         * reader of this method would believe it holds.
+         *
+         * The consequence is worth stating rather than hiding: a project reading these fields
+         * through the API sees `''` for "cleared", never NULL. Only the three fields of this form
+         * are sent, so `description` keeps whatever it had (ADR 0022).
+         */
+        $envelope = $this->call($request, '/api/update', array(
+            'entity' => self::ENTITY_FILE,
+            'id'     => $id,
+            'data'   => $values,
+        ));
+
+        if (!$envelope['ok']) {
+            $property = FieldError::property($envelope['error'], self::METADATA_FIELDS);
+            $message  = FieldError::message($envelope['error'], $envelope['readable']);
+
+            /*
+             * THE FINDING GOES TO ITS FIELD WHEN THE FIELD IS KNOWN, otherwise above the form —
+             * the decision `FormController::reject()` makes, with the same single guess in
+             * `FieldError` and the same fallback. The core names no field of its own (gap L19).
+             */
+            return $property === null
+                ? $this->renderDetail($request, $manager, $id, $values, array(), $message)
+                : $this->renderDetail($request, $manager, $id, $values, array($property => $message));
+        }
+
+        /*
+         * 303 TO THIS FILE'S OWN PAGE, with the report in the query — `back()` builds exactly
+         * that when it is handed an address and no folder. A reload of the destination is then a
+         * GET and cannot write again.
+         */
+        return self::back($manager->getPrefix().'/files/'.rawurlencode($id), null, array('done' => self::METADATA));
+    }
+
+    /**
+     * The file's page itself — optionally carrying what a refused save had typed into it.
+     *
+     * SPLIT OUT OF `detailAction()` SO THERE IS ONE PAGE, not one for reading and one for a
+     * rejection. `FormController` learned the same thing: two render paths for the same page
+     * drift, and the one that drifts is the rejection path, which is the one nobody looks at.
+     *
+     * @param array<string,string>|null $values      Submitted values to keep, or `null` for the record's own
+     * @param array<string,string>      $fieldErrors Message per property
+     */
+    private function renderDetail(
+        Request $request,
+        AdminManager $manager,
+        string $id,
+        ?array $values = null,
+        array $fieldErrors = array(),
+        ?string $error = null
+    ): Response {
+        /*
          * THE ID IS NOT CHECKED FOR A FORMAT, and that is deliberate — measured, after the
          * opposite was written here first.
          *
@@ -442,6 +612,29 @@ final class FileController
             $controllers['admin-file-variant'] = 'admin/file-variant';
         }
 
+        $mayWrite = $this->mayWrite(self::ENTITY_FILE);
+
+        /*
+         * THE FORM'S VALUES COME FROM THE SUBMISSION WHEN THERE WAS ONE, otherwise from the
+         * record. That is what keeps a refused save from handing back an empty mask — and it is
+         * the only reason this method takes `$values` at all.
+         */
+        $labels = array('alias' => 'Kurzname', 'title' => 'Titel', 'altText' => 'Alternativtext');
+
+        $fields = array();
+
+        foreach (self::METADATA_FIELDS as $property) {
+            $fields[] = array(
+                'property'  => $property,
+                'label'     => $labels[$property],
+                'value'     => $values === null ? self::text($record->{$property} ?? null) : ($values[$property] ?? ''),
+                'error'     => $fieldErrors[$property] ?? null,
+                'maxlength' => self::METADATA_MAX_LENGTH,
+            );
+        }
+
+        $token = FormToken::issue($request);
+
         $html = $this->app[TemplateRenderer::CONTAINER_KEY]->render('file.html.twig', array(
             'title'      => $name.' — '.$manager->getTitle(),
             'stylesheet' => $manager->assetUrl('admin.css'),
@@ -481,9 +674,34 @@ final class FileController
              * reading a missing right must never produce.
              */
             'isRoot'         => $mayReadFolders && $folderId === null,
+            'mayWrite'    => $mayWrite,
+            'fields'      => $fields,
+            'error'       => $error,
+            'formUrl'     => $base.rawurlencode($id),
+            'token'       => $token,
+            'tokenField'  => FormToken::FIELD,
+            'actionField' => self::ACTION_FIELD,
+            'metadata'    => self::METADATA,
+            /*
+             * THE REPORT IS READ FROM THE QUERY, the way the listing reads it: the successful
+             * save left with a 303, so the sentence it wants to show travels in the address and
+             * not in a session.
+             */
+            'report'      => self::report($request),
         ));
 
-        return new Response($html, 200, array('Content-Type' => 'text/html; charset=UTF-8'));
+        $response = new Response($html, 200, array('Content-Type' => 'text/html; charset=UTF-8'));
+
+        /*
+         * THE TOKEN'S COOKIE IS SET THE WAY THE LISTING SETS IT. Without it
+         * `FormToken::verify()` has nothing to compare the field against, and the metadata form
+         * would be refused as expired on a browser that reached this page first.
+         */
+        if (!FormToken::isIssued($request, $token)) {
+            $response->headers->setCookie(FormToken::cookie($request, $token, $manager->getPrefix()));
+        }
+
+        return $response;
     }
 
     /**
@@ -738,9 +956,12 @@ final class FileController
     }
 
     /**
-     * Back to the folder the action came from, as a redirect.
+     * Back to where the action came from, as a redirect, with the report in the query.
      *
      * 303 AND NOT 302, so a reload of the destination is a GET and cannot repeat the action.
+     *
+     * THE ADDRESS IS A PARAMETER, not always the listing: handed a file's own page and no folder,
+     * this returns the editor there — which is where a saved metadata form belongs.
      */
     private static function back(string $base, ?string $folder, array $report): Response
     {
@@ -819,10 +1040,11 @@ final class FileController
         }
 
         $erfolge = array(
-            self::RENAME => 'Die Datei ist umbenannt.',
-            self::MOVE   => 'Die Datei ist verschoben.',
-            self::DELETE => 'Die Datei ist gelöscht.',
-            self::UPLOAD => 'Die Datei ist hochgeladen.',
+            self::RENAME   => 'Die Datei ist umbenannt.',
+            self::MOVE     => 'Die Datei ist verschoben.',
+            self::DELETE   => 'Die Datei ist gelöscht.',
+            self::UPLOAD   => 'Die Datei ist hochgeladen.',
+            self::METADATA => 'Die Angaben sind gespeichert.',
         );
 
         return isset($erfolge[$done]) ? array('ok' => true, 'text' => $erfolge[$done]) : null;

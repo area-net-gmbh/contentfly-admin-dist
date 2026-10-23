@@ -31,6 +31,20 @@
     derivable types — then one sentence says so; or an entry failed, which the module says at the
     entry. `FileController` decides which of the first two applies.
 
+    THE METADATA FORM IS PART OF THIS PAGE (003-003-0004), and the alternative text sits at the
+    same level as the title — not behind a disclosure. It is required for accessibility in every
+    project that publishes the images, and what has to be unfolded first does not get filled in.
+
+    A REFUSED SAVE COMES BACK AS THIS PAGE WITH THE TYPED VALUES STILL IN IT, and a finding goes
+    to its field when the field is known, otherwise above the form — the two places and the single
+    guess are `FormController`'s, and `FileController` decides which applies. A success leaves with
+    a 303 instead, so a reload cannot write again; the sentence then arrives in the address and is
+    shown by the report above.
+
+    WITHOUT THE WRITE RIGHT THE FORM IS ABSENT and the three values are read as facts. Hiding it
+    is tidiness — `saveMetadata()` refuses the post as well, which is the part that closes the
+    data.
+
     THE PUBLIC ADDRESS IS STATED, AND SO IS WHAT IT MEANS. The core serves every stored file
     under this route without asking for a login (Schema-Vertrag L23). An editor who hands the
     address on should know that, and a page that shows the address while staying silent about it
@@ -52,6 +66,14 @@
     </nav>
 
     <h1>{{ name }}</h1>
+
+{% if report %}
+    <p class="admin-files__report{{ report.ok ? ' admin-files__report--ok' : ' admin-files__report--problem' }}"
+       role="status">{{ report.text }}</p>
+{% endif %}
+{% if error %}
+    <p class="admin-form__error" role="alert">{{ error }}</p>
+{% endif %}
 
     <div class="admin-file__layout">
         <div class="admin-file__preview-box">
@@ -99,6 +121,43 @@
             </dd>
         </dl>
     </div>
+
+    <section class="admin-file__meta" aria-labelledby="admin-file-meta">
+        <h2 class="admin-file__meta-heading" id="admin-file-meta">Angaben zur Datei</h2>
+{% if mayWrite %}
+        <form class="admin-file__meta-form" method="post" action="{{ formUrl }}">
+            <input type="hidden" name="{{ tokenField }}" value="{{ token }}">
+            <input type="hidden" name="{{ actionField }}" value="{{ metadata }}">
+{% for field in fields %}
+{% set described = field.error ? 'error-' ~ field.property : '' %}
+            <div class="admin-form__field{% if field.error %} admin-form__field--invalid{% endif %}">
+                <label class="admin-form__label" for="field-{{ field.property }}">{{ field.label }}</label>
+                <input class="admin-form__control" type="text" id="field-{{ field.property }}"
+                       name="{{ field.property }}" value="{{ field.value }}"
+                       maxlength="{{ field.maxlength }}"
+{%- if field.property == 'altText' %} aria-describedby="hint-altText{% if field.error %} {{ described }}{% endif %}"
+{%- elseif field.error %} aria-describedby="{{ described }}"
+{%- endif %}{% if field.error %} aria-invalid="true"{% endif %}>
+{% if field.property == 'altText' %}
+                <p class="admin-form__hint" id="hint-altText">Beschreibt, was auf dem Bild zu sehen ist — für Menschen, die es nicht sehen können, und für Suchmaschinen. Keine Wiederholung des Titels.</p>
+{% endif %}
+{% if field.error %}
+                <p class="admin-form__field-error" id="{{ described }}">{{ field.error }}</p>
+{% endif %}
+            </div>
+{% endfor %}
+            <button class="admin-files__action-button" type="submit">Angaben speichern</button>
+        </form>
+{% else %}
+        <dl class="admin-file__facts">
+{% for field in fields %}
+            <dt class="admin-file__term">{{ field.label }}</dt>
+            <dd class="admin-file__value">{{ field.value != '' ? field.value : '—' }}</dd>
+{% endfor %}
+        </dl>
+        <p class="admin-form__hint" role="status">Du darfst diese Angaben ansehen, aber nicht ändern.</p>
+{% endif %}
+    </section>
 
 {% if hasAliases %}
     <section class="admin-file__variants" aria-labelledby="admin-file-variants">
