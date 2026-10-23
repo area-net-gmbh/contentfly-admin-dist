@@ -12,6 +12,7 @@ use Areanet\ContentflyAdmin\Command\PublishAssetsCommand;
 use Areanet\ContentflyAdmin\Controller\AssetController;
 use Areanet\ContentflyAdmin\Controller\BulkController;
 use Areanet\ContentflyAdmin\Controller\FileController;
+use Areanet\ContentflyAdmin\Controller\FilePickerController;
 use Areanet\ContentflyAdmin\Controller\FormController;
 use Areanet\ContentflyAdmin\Controller\ListController;
 use Areanet\ContentflyAdmin\Controller\OptionsController;
@@ -425,6 +426,28 @@ final class AdminManager
         $this->app['routeManager']
             ->mount($this->prefix.'/options', OptionsController::class)
             ->get('{entity}/{property}', true, 'optionsAction');
+
+        /*
+         * THE IMAGE PICKER GETS A MOUNT OF ITS OWN, and that is the decision of ADR 0023 rather
+         * than a third route on `/files`. It stands here, next to the options search, because it
+         * is the same kind of thing: a JSON data source for one field of the form, whose only
+         * caller is a Stimulus controller. The file manager's own mount below renders pages a
+         * person reads; `detailAction` belongs there, a selection list does not.
+         *
+         * NO ENTITY PLACEHOLDER, unlike the options search: this works against `PIM\File` and
+         * `PIM\Folder` alone, so the names are constants in the controller (ADR 0005 still has
+         * the whitelist checked there).
+         *
+         * `get()` AND NOT `match()`: this route only reads. The `match()` of the list, the bulk
+         * actions and the file manager exists because a `post()` beside a `get()` on the same
+         * path would replace it — there is no POST here to collide with.
+         *
+         * `isSecure = true`: reading files goes through `Api::getList()`, which asks
+         * `Permission::isReadable()` about the `auth.user` that only a guarded main request sets.
+         */
+        $this->app['routeManager']
+            ->mount($this->prefix.'/filepicker', FilePickerController::class)
+            ->get('', true, 'pickerAction');
 
         /*
          * THE SAMMELAKTIONEN GET A MOUNT OF THEIR OWN, like everything else under the prefix —

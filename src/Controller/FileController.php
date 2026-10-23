@@ -46,6 +46,7 @@ final class FileController
 {
     use GuardsCoreVersion;
     use GuardsPermissions;
+    use ResolvesFiles;
 
     /**
      * The entity whose records this view manages.
@@ -60,23 +61,6 @@ final class FileController
 
     /** The tree entity that gives the files their folders. */
     public const ENTITY_FOLDER = 'PIM\\Folder';
-
-    /**
-     * The query parameter that carries the open folder.
-     *
-     * A PARAMETER AND NOT A PATH SEGMENT (ADR 0020). A placeholder matches one segment
-     * (ADR 0007), so no route could address a folder tree of arbitrary depth.
-     */
-    public const PARAM_FOLDER = 'folder';
-
-    /**
-     * The `where` value that asks `Api::getList()` for the records whose relation is unset.
-     *
-     * THE ROOT IS "NO FOLDER", not "all files". `ListController` uses the same literal for the
-     * same core convention — verified against the running harness: `folder => '-1'` returns the
-     * one file that sits outside every folder, while an unknown id returns none.
-     */
-    private const FOLDER_UNSET = '-1';
 
     /** How many files one page of the listing shows. */
     public const ITEMS_PER_PAGE = 50;
@@ -158,12 +142,6 @@ final class FileController
     private const EMPTY_CELL = '—';
 
     /**
-     * The core's own file route. Fixed, not configurable: `file` is one of the prefixes the core
-     * mounts itself and the admin refuses to be mounted on (`AdminManager::RESERVED_PREFIXES`).
-     */
-    private const CORE_FILE_ROUTE = '/file/get';
-
-    /**
      * The core's upload route, and the field it reads the file from.
      *
      * Fixed for the same reason as `CORE_FILE_ROUTE`: `file` is a prefix the core mounts itself.
@@ -173,20 +151,6 @@ final class FileController
      */
     private const CORE_UPLOAD_ROUTE = '/file/upload';
     private const CORE_UPLOAD_FIELD = 'file';
-
-    /**
-     * The types a derivative can be made from.
-     *
-     * THE LIST IS THE CORE'S, NOT A GUESS. `Processing\Image::getMimeTypes()` registers exactly
-     * these three; for anything else `Processing::getInstance()` hands back the `Standard`
-     * processor, and `FileController::getAction` then raises `FileNotFoundException`
-     * (Schema-Vertrag 8.3). Asking for a size on a fourth type is therefore not a degraded
-     * preview, it is a 500 per row — which is why `image/svg+xml` and `image/webp` belong on the
-     * icon side even though their names say image.
-     *
-     * @var list<string>
-     */
-    private const THUMBNAILABLE = array('image/jpeg', 'image/gif', 'image/png');
 
     /** @var \Areanet\PIM\Classes\Kernel\ApplicationInterface */
     private $app;
@@ -1085,51 +1049,6 @@ final class FileController
     }
 
     /**
-     * The folder the address asks for, or `null` for the root.
-     *
-     * AN UNKNOWN FOLDER FALLS BACK TO THE ROOT RATHER THAN ANSWERING 404. The folder is view
-     * state in the query string, like the list's sort column and page number, and the list
-     * clamps invalid state instead of refusing it (ADR 0018). A folder that was deleted while
-     * someone had the page open is the ordinary way to get here, and dropping them at the root
-     * is a better answer than a page that reads like a broken link.
-     *
-     * WITHOUT THE RIGHT TO READ FOLDERS IT CANNOT BE CHECKED, so it is passed through as an
-     * opaque filter value — an unknown id then simply matches no file (verified against the
-     * running harness). That asymmetry is deliberate: the alternative would be to deny a folder
-     * view to an editor who may read the files in it.
-     */
-    private static function requestedFolder(Request $request, ?array $tree, bool $mayReadFolders): ?string
-    {
-        $wanted = $request->query->get(self::PARAM_FOLDER);
-
-        if (!is_string($wanted) || $wanted === '') {
-            return null;
-        }
-
-        if (!$mayReadFolders) {
-            return $wanted;
-        }
-
-        return self::find($tree ?? array(), $wanted) === null ? null : $wanted;
-    }
-
-    /** The node with this id, anywhere in the tree, or `null`. */
-    private static function find(array $nodes, string $id): ?array
-    {
-        foreach ($nodes as $node) {
-            if (($node['id'] ?? null) === $id) {
-                return $node;
-            }
-
-            if (($found = self::find($node['childs'] ?? array(), $id)) !== null) {
-                return $found;
-            }
-        }
-
-        return null;
-    }
-
-    /**
      * The tree, with a URL and an open/current marker on every node.
      *
      * THE ADDRESSES ARE BUILT HERE AND NOT IN TWIG, the rule the list view follows for the same
@@ -1243,31 +1162,6 @@ final class FileController
     }
 
     /**
-     * One address of a file: the derivative with an alias, the stored original without one.
-     *
-     * `null` MEANS "SHOW THE BADGE INSTEAD" and happens in exactly one case: the file is not one
-     * of the three types a derivative can be made from. For those the core answers a size request
-     * with a 500, so not asking is the whole point (ADR 0020).
-     *
-     * THE TRAILING SEGMENT IS COSMETIC. The record is found by `{id}` alone (Schema-Vertrag 8.1);
-     * the name only makes the address readable, so it is encoded and never trusted to route.
-     */
-    private static function preview(string $id, string $name, string $type, ?string $alias): ?string
-    {
-        if ($id === '' || !in_array($type, self::THUMBNAILABLE, true)) {
-            return null;
-        }
-
-        $tail = $name === '' ? 'datei' : rawurlencode($name);
-
-        if ($alias === null) {
-            return self::CORE_FILE_ROUTE.'/'.rawurlencode($id).'/'.$tail;
-        }
-
-        return self::CORE_FILE_ROUTE.'/'.rawurlencode($id).'/s-'.rawurlencode($alias).'/'.$tail;
-    }
-
-    /**
      * The stored file's own address, whatever its type.
      *
      * UNLIKE `preview()` THIS DOES NOT GATE ON THE TYPE, and the difference is the whole point.
@@ -1367,25 +1261,6 @@ final class FileController
     }
 
     /**
-     * The short label a file without a preview shows in the preview box.
-     *
-     * A LABEL AND NOT AN ICON FILE, because the set of types is open: a project can store
-     * anything, and an icon set would either need a file per type or a generic image that says
-     * less than the four letters it replaces. The subtype is what distinguishes them.
-     *
-     * AN UNKNOWN OR EMPTY TYPE STILL GETS SOMETHING. An empty box is indistinguishable from a
-     * preview that failed to load, and that is the one reading this must not have.
-     */
-    private static function badge(string $type): string
-    {
-        $subtype = strtolower(substr($type, (int) strpos($type, '/') + 1));
-        /* `svg+xml` and `vnd.openxmlformats-…` carry their family after a separator. */
-        $subtype = preg_replace('#[^a-z0-9].*$#', '', $subtype) ?? '';
-
-        return $subtype === '' ? '?' : strtoupper(substr($subtype, 0, 4));
-    }
-
-    /**
      * A byte count as something a person reads.
      *
      * Kept here rather than in a helper: it has one caller, and the package's rule is no
@@ -1408,14 +1283,6 @@ final class FileController
         }
 
         return self::EMPTY_CELL;
-    }
-
-    /** The page number the address asks for, never below one. */
-    private static function page(Request $request): int
-    {
-        $page = $request->query->get('page');
-
-        return is_numeric($page) ? max(1, (int) $page) : 1;
     }
 
     /**
