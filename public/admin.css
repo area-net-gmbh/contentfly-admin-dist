@@ -577,7 +577,7 @@ li {
 }
 
 .admin-form__rte-button:hover {
-    background: var(--admin-hover-dim);
+    filter: brightness(var(--admin-hover-dim));
 }
 
 .admin-form__rte-button:focus-visible {
@@ -659,7 +659,7 @@ li {
 }
 
 .admin-form__search-drop:hover {
-    background: var(--admin-hover-dim);
+    filter: brightness(var(--admin-hover-dim));
 }
 
 .admin-form__search-results {
@@ -688,7 +688,7 @@ li {
 
 .admin-form__search-hit:hover,
 .admin-form__search-hit:focus-visible {
-    background: var(--admin-hover-dim);
+    filter: brightness(var(--admin-hover-dim));
 }
 
 .admin-form__search-note {

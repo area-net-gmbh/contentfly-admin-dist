@@ -142,8 +142,16 @@ final class FormController
      * optionless `select`. Answering both questions from one list would mean either fetching
      * options nobody draws, or handing a value object to `datetime()` because it happens to be
      * an array.
+     *
+     * `search` IS HERE FOR THE SAME REASON, AND IT WAS MISSING FOR THE SAME REASON. It is the
+     * variant the four relation keys collapse onto above `RelationOptions::LIMIT` (`FRAGMENTS`),
+     * so its value is a relation entry exactly like theirs — but it is not one of them, and
+     * reading the id for `RELATION_FRAGMENTS` alone left the single-valued case empty. The list
+     * fragments never noticed, because the template reads `selected()` for them and that knows
+     * both shapes; `entity` above the limit rendered a writable field with no value, and the
+     * next save wrote that emptiness back over the relation (000-000-0002).
      */
-    private const ID_FRAGMENTS = array('entity', 'entitylist', 'radio', 'checkboxgroup', 'file');
+    private const ID_FRAGMENTS = array('entity', 'entitylist', 'radio', 'checkboxgroup', 'file', 'search');
 
     /** The image fragments, which share a picker and the question above. */
     private const IMAGE_FRAGMENTS = array('file', 'filelist');
