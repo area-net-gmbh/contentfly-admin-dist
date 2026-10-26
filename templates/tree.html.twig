@@ -30,6 +30,12 @@
     `harness-liste-pruefen.php` reads the table through `admin-list__cell`. Renaming one without
     the gate makes the gate read nothing and stay green.
 
+    A NODE IS CREATED WHERE IT IS CLICKED, and the place travels in the address rather than in a
+    hidden field: `node.newChildUrl` is the form of this entity with `treeParent` in the query,
+    which `FormController` checks against the tree before it prefills anything. The link at the
+    top creates on the root level and carries no parent at all — without it a tree whose roots
+    are all someone else's would have no reachable place to add anything.
+
     THE LABEL MAY BE AN ID, and that is the maintained state of the entity showing through:
     `settings.labelProperty` defaults to null (gap L6) and `TreeController::labelProperty()`
     answers that with the record's id rather than a guessed field (ADR 0016).
@@ -53,6 +59,8 @@
                 </button>
 {% endif %}
                 <a class="admin-tree__label" href="{{ node.url }}">{{ node.label }}</a>
+                <a class="admin-tree__add" href="{{ node.newChildUrl }}"
+                   title="Unterknoten unter {{ node.label }} anlegen">Unterknoten anlegen</a>
             </div>
 {% if node.childs is not empty %}
             <div class="admin-tree__childs" id="tree-childs-{{ node.id }}"
@@ -69,7 +77,7 @@
 <main class="admin__main">
     <h1>{{ entity }}</h1>
 
-    <p class="admin-tree__new"><a href="{{ newUrl }}">Neuer Datensatz</a></p>
+    <p class="admin-tree__new"><a href="{{ newUrl }}">Neuer Knoten auf oberster Ebene</a></p>
 
     <p class="admin-tree__switch"><a href="{{ listUrl }}">Als Liste anzeigen</a></p>
 

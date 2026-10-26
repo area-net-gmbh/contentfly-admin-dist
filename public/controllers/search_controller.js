@@ -90,8 +90,20 @@ export default class extends Controller {
 
         this.pending = new AbortController();
 
+        /*
+         * THE TERM IS ADDED TO THE ADDRESS, NOT GLUED ONTO IT. This used to be
+         * `${this.urlValue}?q=…`, which assumed the address carries no query of its own — and
+         * story 004-001-0004 gave it one: the parent search of a tree node passes `self`, the
+         * node whose own subtree must not be offered. With the literal `?` that became
+         * `…?self=X?q=term`, where `q` is gone and `self` is nonsense. `URL` appends instead of
+         * assuming, so any parameter the server put there survives.
+         */
+        const address = new URL(this.urlValue, document.baseURI);
+
+        address.searchParams.set('q', term);
+
         try {
-            const response = await fetch(`${this.urlValue}?q=${encodeURIComponent(term)}`, {
+            const response = await fetch(address, {
                 signal: this.pending.signal,
                 headers: { Accept: 'application/json' },
             });

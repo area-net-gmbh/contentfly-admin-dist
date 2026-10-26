@@ -60,6 +60,7 @@ final class FormController
 {
     use GuardsCoreVersion;
     use GuardsPermissions;
+    use ResolvesTree;
 
 
     /**
@@ -269,7 +270,7 @@ final class FormController
             $fields = self::withoutWriteAccess($fields);
         }
 
-        $prepared = $this->prepare($request, $name, $fields);
+        $prepared = $this->prepare($request, $name, $fields, $id);
 
         if ($request->isMethod('POST')) {
             return $this->save($request, $name, $id, $language, $fields, $prepared);
@@ -332,12 +333,46 @@ final class FormController
             $id,
             $fields,
             $prepared,
-            self::recordValues($fields, $record),
+            $this->presetParent($request, $name, $id) + self::recordValues($fields, $record),
             200,
             null,
             array(),
             $mayWrite
         );
+    }
+
+    /**
+     * The parent a new node is created under, when the tree asked for one.
+     *
+     * THE PLACE COMES FROM THE ADDRESS AND IS CHECKED AGAINST THE TREE. `TreeController` links
+     * every node's "Unterknoten anlegen" to this form with `?treeParent=<id>` (ADR 0025 §3), and
+     * an id that is not in *this editor's* tree prefills nothing. That is one check for three
+     * different wrongs — not a record of this entity, not readable under `OWN`/`GROUP`, or
+     * `isIntern` — and they must all fail the same way: distinguishing them would say something
+     * about records the editor cannot see. It also closes the one way around the rule that a node
+     * cannot be created under an invisible parent, namely typing the id into the URL.
+     *
+     * ONLY FOR A NEW RECORD. On an existing one the record's own parent is the truth, and a
+     * query parameter that silently re-parented it on mere opening of the form would be a write
+     * nobody asked for.
+     *
+     * @return array<string,string>
+     */
+    private function presetParent(Request $request, string $name, ?string $id): array
+    {
+        if ($id !== null || !$this->app[EntityView::CONTAINER_KEY]->isTree($name)) {
+            return array();
+        }
+
+        $wanted = $request->query->get(self::PARENT_PROPERTY);
+
+        if (!is_string($wanted) || $wanted === '') {
+            return array();
+        }
+
+        $node = self::findInTree($this->treeRows($request, $name), $wanted);
+
+        return $node === null ? array() : array(self::PARENT_PROPERTY => $wanted);
     }
 
     /**
@@ -997,9 +1032,26 @@ final class FormController
      *
      * @return array<string,array{fragment: string, options: list<array{value: string, label: string}>}>
      */
-    private function prepare(Request $request, string $name, array $fields): array
+    private function prepare(Request $request, string $name, array $fields, ?string $id = null): array
     {
         $provider = $this->app[RelationOptions::CONTAINER_KEY];
+
+        /*
+         * THE SUBTREE A NODE MAY NOT BE MOVED INTO, read once for this request and empty for
+         * everything that is not a tree being edited. The measurement behind it (gap L31): the
+         * core accepts a cycle silently, writes it, and `Api::getTree2()` then answers an empty
+         * tree — the whole tree disappears from the admin with no error anywhere. One choice in
+         * one dropdown is enough, so the choice must not be offered.
+         */
+        $forbidden = array();
+
+        if ($id !== null && $this->app[EntityView::CONTAINER_KEY]->isTree($name)) {
+            $node = self::findInTree($this->treeRows($request, $name), $id);
+
+            if ($node !== null) {
+                $forbidden = self::subtreeIds($node);
+            }
+        }
 
         /*
          * THE ADDRESS IS BUILT HERE AND NOT IN THE TEMPLATE, like every other address of this
@@ -1070,6 +1122,35 @@ final class FormController
                     $search   = $options.'/'.rawurlencode($field['property']);
                 } else {
                     $choices = $relation['options'];
+                }
+
+                /*
+                 * THE NODE ITSELF AND ITS OWN SUBTREE ARE TAKEN OUT OF THE PARENT CHOICES. The
+                 * narrowing to the own entity happens one layer down, in
+                 * `WidgetResolver::target()` — what cannot be decided there is which *record* is
+                 * being edited, and that is exactly what a cycle depends on.
+                 *
+                 * `isIntern` NEEDS NO FILTER HERE: the options come from `Api::getList()`, which
+                 * hard-wires `isIntern = false` (gap L25), so an internal node is never offered
+                 * as a parent in the first place. Measured in 004-001-0001.
+                 */
+                if ($forbidden !== array() && $field['property'] === self::PARENT_PROPERTY) {
+                    $choices = array_values(array_filter(
+                        $choices,
+                        static function (array $option) use ($forbidden): bool {
+                            return !in_array((string) ($option['value'] ?? ''), $forbidden, true);
+                        }
+                    ));
+
+                    /*
+                     * AND THE SEARCH ROUTE HEARS ABOUT IT TOO. Above `RelationOptions::LIMIT`
+                     * the choices are not rendered at all and the editor searches instead — a
+                     * large tree is precisely where a cycle is most likely, so the exclusion
+                     * must travel with the address rather than stop at the inline list.
+                     */
+                    if ($search !== null) {
+                        $search .= '?self='.rawurlencode($id);
+                    }
                 }
             }
 

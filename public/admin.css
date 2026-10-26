@@ -1797,3 +1797,18 @@ li {
     margin: 1.5rem 0 0;
     color: var(--admin-muted);
 }
+
+/*
+ * THE ADD LINK IS SUBDUED, NOT HIDDEN. Revealing it on hover was tried and dropped: a touch
+ * device has no hover, so the link would simply not exist there — and "create a node" is not a
+ * power-user shortcut that may go missing on a tablet. Smaller and muted is enough to keep a
+ * tree of fifty nodes from reading as a page about adding.
+ */
+.admin-tree__add {
+    font-size: 0.8125rem;
+    color: var(--admin-muted);
+}
+
+.admin-tree__add:hover {
+    filter: brightness(var(--admin-hover-dim));
+}

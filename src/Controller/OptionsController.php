@@ -39,6 +39,7 @@ final class OptionsController
 {
     use GuardsCoreVersion;
     use GuardsPermissions;
+    use ResolvesTree;
 
     /** @var \Areanet\PIM\Classes\Kernel\ApplicationInterface */
     private $app;
@@ -86,7 +87,40 @@ final class OptionsController
 
         $result = $this->app[RelationOptions::CONTAINER_KEY]->search($widget, $query, $request);
 
-        return new JsonResponse($result === null ? array() : $result['options']);
+        $options = $result === null ? array() : $result['options'];
+
+        /*
+         * A NODE IS NOT OFFERED AS ITS OWN PARENT, NOR IS ANYTHING BELOW IT. `FormController`
+         * takes the same ids out of the inline list; above `RelationOptions::LIMIT` there is no
+         * inline list, and a large tree is exactly where a cycle is most likely to be reachable.
+         * The cost of missing it is measured and total: the core writes the cycle without a word
+         * and `Api::getTree2()` then answers an empty tree — the whole tree gone from the admin
+         * with no error anywhere (gap L31).
+         *
+         * THE ID COMES FROM THE REQUEST, AND THAT IS SAFE HERE BECAUSE IT ONLY EVER *REMOVES*
+         * CHOICES. A forged or stale `self` can hide a legitimate parent from one dropdown; it
+         * cannot reveal a record, widen a permission or offer a node from another tree — the
+         * target entity is decided in `WidgetResolver::target()` from the schema, never from
+         * here (ADR 0025 §3). An id that is not in the tree removes nothing.
+         */
+        $self = $request->query->get('self');
+
+        if (is_string($self) && $self !== '' && $property === self::PARENT_PROPERTY
+            && $this->app[EntityView::CONTAINER_KEY]->isTree($name)) {
+            $node = self::findInTree($this->treeRows($request, $name), $self);
+
+            if ($node !== null) {
+                $forbidden = self::subtreeIds($node);
+                $options   = array_values(array_filter(
+                    $options,
+                    static function (array $option) use ($forbidden): bool {
+                        return !in_array((string) ($option['value'] ?? ''), $forbidden, true);
+                    }
+                ));
+            }
+        }
+
+        return new JsonResponse($options);
     }
 
     /**

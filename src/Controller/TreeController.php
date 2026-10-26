@@ -10,7 +10,6 @@ use Areanet\ContentflyAdmin\Schema\SchemaClient;
 use Areanet\ContentflyAdmin\View\EntityView;
 use Areanet\ContentflyAdmin\View\MenuBuilder;
 use Areanet\ContentflyAdmin\View\TemplateRenderer;
-use Areanet\PIM\Classes\Api;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -40,6 +39,7 @@ final class TreeController
 {
     use GuardsCoreVersion;
     use GuardsPermissions;
+    use ResolvesTree;
 
     /** @var \Areanet\PIM\Classes\Kernel\ApplicationInterface */
     private $app;
@@ -97,9 +97,9 @@ final class TreeController
          * (ADR 0025). The permission was checked above, which is what keeps this call from
          * raising instead of answering.
          */
-        $rows = (new Api($this->app, $request))->getTree2($name);
+        $rows = $this->treeRows($request, $name);
 
-        $nodes = self::nodes(is_array($rows) ? $rows : array(), self::labelProperty($schema, $name), $formBase);
+        $nodes = self::nodes($rows, self::labelProperty($schema, $name), $formBase);
 
         $html = $this->app[TemplateRenderer::CONTAINER_KEY]->render('tree.html.twig', array(
             'title'      => $name.' — '.$manager->getTitle(),
@@ -159,7 +159,7 @@ final class TreeController
      *
      * @param list<array<string,mixed>> $rows
      *
-     * @return list<array{id: string, label: string, url: string, childs: list<array<string,mixed>>}>
+     * @return list<array{id: string, label: string, url: string, newChildUrl: string, childs: list<array<string,mixed>>}>
      */
     private static function nodes(array $rows, ?string $label, string $formBase): array
     {
@@ -183,10 +183,17 @@ final class TreeController
             $childs = $row['childs'] ?? array();
 
             $nodes[] = array(
-                'id'     => $id,
-                'label'  => $text,
-                'url'    => $formBase.'/'.rawurlencode($id),
-                'childs' => self::nodes(is_array($childs) ? $childs : array(), $label, $formBase),
+                'id'    => $id,
+                'label' => $text,
+                'url'   => $formBase.'/'.rawurlencode($id),
+                /*
+                 * THE PLACE IS IN THE ADDRESS, not in a hidden field of the tree page. Opening
+                 * the form is a plain link — the same way every other navigation in this admin
+                 * works — and the parent travels as a query parameter, which `FormController`
+                 * checks against the tree before it prefills anything (ADR 0025 §3).
+                 */
+                'newChildUrl' => $formBase.'?treeParent='.rawurlencode($id),
+                'childs'      => self::nodes(is_array($childs) ? $childs : array(), $label, $formBase),
             );
         }
 
