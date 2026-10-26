@@ -1875,3 +1875,27 @@ li {
     background: var(--admin-danger-surface);
     color: var(--admin-danger-text);
 }
+
+/*
+ * THE TWO DROP STATES ARE DELIBERATELY DIFFERENT SHAPES, because they mean different things and
+ * a drag has to say which one is about to happen (story 004-002-0002, ADR 0026 §1). A line
+ * between two rows means "land here, as a sibling, in this position". A framed row means "go
+ * under this node, as its child". One shape for both would leave the editor guessing whether a
+ * drop reorders or reparents — and reparenting is the move that can make a branch disappear.
+ *
+ * NO HANDLE RULE HERE. The handle is injected by the module, so its rule lives with the code
+ * that creates it; a handle styled server-side would be visible without the module and do
+ * nothing.
+ */
+.admin-tree__marker {
+    height: 0;
+    margin: 0;
+    border: 0;
+    border-top: 2px solid var(--admin-accent);
+}
+
+.admin-tree__row--drop {
+    outline: 2px solid var(--admin-accent);
+    outline-offset: 1px;
+    border-radius: 3px;
+}

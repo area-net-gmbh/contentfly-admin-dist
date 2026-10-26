@@ -42,6 +42,20 @@
     top creates on the root level and carries no parent at all — without it a tree whose roots
     are all someone else's would have no reachable place to add anything.
 
+    THE DRAG HOOKS ARE DATA, NOT A CONTROL (story 004-002-0002). Each node carries its own id,
+    its parent's id and the `sorting` it was rendered with; a root carries an empty parent value
+    rather than no attribute, so "is a root" and "attribute missing" stay distinguishable. There
+    is deliberately NO handle in this markup: a handle rendered by the server would be a visible
+    control that does nothing without the module, so the module injects it the way
+    `sortable_controller.js` does. The attributes appear only when `maySort` is true — the schema
+    says the entity carries an order AND the editor may write (ADR 0026 §5) — which keeps the
+    markup byte-identical to before this story wherever dragging is not on offer.
+
+    `sorting` IS PRINTED EVEN THOUGH IT IS USUALLY MEANINGLESS. Every node starts on `0`, and at
+    a tie the database picks the order (gap `L33`) — so this number is not the order, it is what
+    this page believed the order was. A move states it so the server can renumber the whole level
+    instead of inserting into a sequence that does not exist (ADR 0026 §3).
+
     THE LABEL MAY BE AN ID, and that is the maintained state of the entity showing through:
     `settings.labelProperty` defaults to null (gap L6) and `TreeController::labelProperty()`
     answers that with the record's id rather than a guessed field (ADR 0016).
@@ -54,10 +68,11 @@
     was read as a bare variable here first and the page answered 500 — Twig runs with
     `strict_variables`, which is what turned a silent omission into a loud one.
 #}
-{% macro branch(nodes, mayDelete) %}
+{% macro branch(nodes, mayDelete, maySort) %}
     <ul class="admin-tree__list">
 {% for node in nodes %}
-        <li class="admin-tree__node">
+        <li class="admin-tree__node"
+{%- if maySort %} data-admin-tree-id="{{ node.id }}" data-admin-tree-parent="{{ node.parentId }}" data-admin-tree-sorting="{{ node.sorting }}"{% endif %}>
             <div class="admin-tree__row">
 {% if node.childs is not empty %}
                 <button type="button" class="admin-tree__toggle"
@@ -80,7 +95,7 @@
 {% if node.childs is not empty %}
             <div class="admin-tree__childs" id="tree-childs-{{ node.id }}"
                  data-admin-tree-target="childs" data-admin-tree-node="{{ node.id }}">
-{{ _self.branch(node.childs, mayDelete) }}
+{{ _self.branch(node.childs, mayDelete, maySort) }}
             </div>
 {% endif %}
         </li>
@@ -124,8 +139,9 @@
     <p class="admin-tree__empty">Für diese Datenart gibt es noch keine Einträge.</p>
 {% else %}
     <div class="admin-tree" data-controller="admin-tree"
-         data-admin-tree-entity-value="{{ entity }}">
-{{ _self.branch(nodes, mayDelete) }}
+         data-admin-tree-entity-value="{{ entity }}"
+         data-admin-tree-sortable-value="{{ maySort ? 'true' : 'false' }}">
+{{ _self.branch(nodes, mayDelete, maySort) }}
     </div>
 {% endif %}
 </main>

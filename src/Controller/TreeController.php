@@ -146,6 +146,13 @@ final class TreeController
             'newUrl'     => $formBase,
             'nodes'      => $nodes,
             'mayDelete'  => $this->mayDelete($name),
+            /*
+             * NO HANDLE WITHOUT BOTH (ADR 0026 §5): the schema has to say the entity carries an
+             * order, and the editor has to be allowed to write. A handle whose write cannot
+             * arrive is worse than no handle. The server-side check in 004-002-0003 does not
+             * hang on this flag — it stands on its own, the way the delete does.
+             */
+            'maySort'    => $this->mayWrite($name) && self::isSortable($schema, $name),
             'confirm'    => $confirm,
             'report'     => self::report($request),
             'token'      => $token,
@@ -354,6 +361,21 @@ final class TreeController
      *
      * @param array<string,mixed> $schema
      */
+    /**
+     * May this entity's nodes be reordered at all — read from the schema, never guessed.
+     *
+     * `settings.isSortable` IS THE FLAG, NOT `properties.sorting.sortable`. The two are named
+     * almost alike and mean different things, measured on the same schema: `settings.isSortable`
+     * is `true` and says "this entity has an order of its own" (every `BaseSortable`), while
+     * `properties.sorting.sortable` is `false` and says "the list may be sorted by this column".
+     * A consumer reading the wrong one offers drag handles either never or always (gap `L34`,
+     * ADR 0026 §5).
+     */
+    private static function isSortable(array $schema, string $entity): bool
+    {
+        return ($schema[$entity]['settings']['isSortable'] ?? null) === true;
+    }
+
     private static function labelProperty(array $schema, string $entity): ?string
     {
         $label = $schema[$entity]['settings']['labelProperty'] ?? null;
@@ -382,7 +404,7 @@ final class TreeController
      *
      * @param list<array<string,mixed>> $rows
      *
-     * @return list<array{id: string, label: string, url: string, newChildUrl: string, childs: list<array<string,mixed>>}>
+     * @return list<array{id: string, label: string, sorting: int, parentId: string|null, url: string, newChildUrl: string, childs: list<array<string,mixed>>}>
      */
     private static function nodes(array $rows, ?string $label, string $formBase): array
     {
@@ -405,10 +427,27 @@ final class TreeController
 
             $childs = $row['childs'] ?? array();
 
+            /*
+             * `sorting` AND THE PARENT TRAVEL BECAUSE THE DRAG NEEDS BOTH (story 004-002-0002),
+             * and both come out of the rows `getTree2()` already delivered — no second query.
+             * Measured shape (schema contract 9.1 and 10.1): `sorting` is an `integer`, `parent`
+             * is `array('id' => …)` with a `null` id at a root, and `parent_id` is not in the row
+             * at all.
+             *
+             * EVERY NODE STARTS ON `sorting = 0`, so this value is not an order — it is the
+             * absence of one (gap `L33`). Three freshly created siblings all carry `0` and come
+             * back in an order the database picked. It is printed anyway, because a move has to
+             * state what it believed the order was.
+             */
+            $parent   = $row['parent'] ?? null;
+            $parentId = is_array($parent) ? ($parent['id'] ?? null) : null;
+
             $nodes[] = array(
-                'id'    => $id,
-                'label' => $text,
-                'url'   => $formBase.'/'.rawurlencode($id),
+                'id'       => $id,
+                'label'    => $text,
+                'sorting'  => (int) ($row['sorting'] ?? 0),
+                'parentId' => is_string($parentId) || is_int($parentId) ? (string) $parentId : null,
+                'url'      => $formBase.'/'.rawurlencode($id),
                 /*
                  * THE PLACE IS IN THE ADDRESS, not in a hidden field of the tree page. Opening
                  * the form is a plain link — the same way every other navigation in this admin
@@ -416,7 +455,7 @@ final class TreeController
                  * checks against the tree before it prefills anything (ADR 0025 §3).
                  */
                 'newChildUrl' => $formBase.'?treeParent='.rawurlencode($id),
-                'childs'      => self::nodes(is_array($childs) ? $childs : array(), $label, $formBase),
+                'childs'       => self::nodes(is_array($childs) ? $childs : array(), $label, $formBase),
             );
         }
 
