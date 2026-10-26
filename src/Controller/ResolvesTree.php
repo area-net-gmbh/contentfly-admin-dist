@@ -91,11 +91,16 @@ trait ResolvesTree
      * One node's id and the ids of everything below it.
      *
      * THIS IS THE LIST A NODE MAY NOT BE MOVED INTO, and the measurement behind it is the reason
-     * the list exists at all: the core accepts a cycle without a word, writes it, and
-     * `Api::getTree2()` then answers an **empty tree** — every node of it disappears from the
-     * admin with no error anywhere (gap L31, measured in 004-001-0004). One wrong choice in a
-     * dropdown is enough. The node itself is in the list because a record that is its own parent
-     * is the shortest cycle there is.
+     * the list exists at all: the core accepts a cycle without a word and writes it, and because
+     * `treeSort()` only descends from rows with an empty `parent_id`, the whole connected
+     * component of the cycle is unreachable afterwards — it disappears from the admin with no
+     * error anywhere (gap L31, measured in 004-001-0004, scope corrected in 004-002-0001).
+     * Re-measured with other nodes in the data: `multiupdate` answers `200`, the cycle really is
+     * in `pim_tree`, and ten nodes became seven — exactly the three of the cycle, while the other
+     * roots stayed visible (schema contract 10.4). The first measurement answered an *empty*
+     * tree because there the three-level tree **was** the whole component. One wrong choice in a
+     * dropdown, or one drop, is enough. The node itself is in the list because a record that is
+     * its own parent is the shortest cycle there is.
      *
      * @param array<string,mixed> $node
      *
@@ -120,6 +125,86 @@ trait ResolvesTree
         }
 
         return $ids;
+    }
+
+    /**
+     * The ids of one level, in the order the tree was read — the children of `$parentId`, or the
+     * roots when it is empty.
+     *
+     * THE ORDER IS THE PAGE'S ORDER, and that matters: `Api::getTree2()` sorts by
+     * `ORDER BY t.parent_id, t.sorting`, so this list is exactly what the editor saw. Rebuilding
+     * it from the database would risk a different tie-break than the one that was rendered, and
+     * at `sorting = 0` every sibling is a tie (gap `L33`).
+     *
+     * @param list<array<string,mixed>> $rows
+     *
+     * @return list<string>
+     */
+    private static function siblingIds(array $rows, string $parentId): array
+    {
+        $level = $rows;
+
+        if ($parentId !== '') {
+            $parent = self::findInTree($rows, $parentId);
+            $childs = $parent === null ? array() : ($parent['childs'] ?? array());
+            $level  = is_array($childs) ? $childs : array();
+        }
+
+        $ids = array();
+
+        foreach ($level as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $id = $row['id'] ?? null;
+
+            if (is_string($id) || is_int($id)) {
+                $ids[] = (string) $id;
+            }
+        }
+
+        return $ids;
+    }
+
+    /**
+     * The id of one node's parent, or `null` when it has none here.
+     *
+     * IT LOOKS FOR THE NODE AS SOMEBODY'S CHILD, which is what makes it short and correct: the
+     * answer is the id of whoever holds it. `null` therefore covers two cases on purpose — the
+     * node is a root, or it is not in this tree at all. A caller that must tell them apart asks
+     * `findInTree()` first, which is what `move()` does before it ever calls this.
+     *
+     * READ FROM THE STRUCTURE, NOT FROM THE ROW. The row does carry `parent` as
+     * `array('id' => …)` (schema contract 9.1), but the structure is what was rendered and what
+     * a move operates on; two sources could only ever agree or signal a bug.
+     *
+     * @param list<array<string,mixed>> $rows
+     */
+    private static function parentIdOf(array $rows, string $id): ?string
+    {
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $childs = $row['childs'] ?? array();
+            $childs = is_array($childs) ? $childs : array();
+
+            foreach ($childs as $child) {
+                if (is_array($child) && (string) ($child['id'] ?? '') === $id) {
+                    return (string) ($row['id'] ?? '');
+                }
+            }
+
+            $found = self::parentIdOf($childs, $id);
+
+            if ($found !== null) {
+                return $found;
+            }
+        }
+
+        return null;
     }
 
     /**

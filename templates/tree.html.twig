@@ -51,6 +51,13 @@
     says the entity carries an order AND the editor may write (ADR 0026 §5) — which keeps the
     markup byte-identical to before this story wherever dragging is not on offer.
 
+    THE TOKEN IS IN THE MARKUP BECAUSE THERE IS NO FORM TO CARRY IT (story 004-002-0003). Every
+    other write on this page is a form, and the delete renders `_token` as a field — but a move
+    is posted by the module, and the token's cookie is `HttpOnly` on purpose, so nothing in the
+    browser can read it there. `FormToken` is built for exactly this: the *server* renders the
+    value, the browser only hands it back. It is emitted only with `maySort`, so a page that
+    offers no dragging also carries no token for one.
+
     `sorting` IS PRINTED EVEN THOUGH IT IS USUALLY MEANINGLESS. Every node starts on `0`, and at
     a tie the database picks the order (gap `L33`) — so this number is not the order, it is what
     this page believed the order was. A move states it so the server can renumber the whole level
@@ -140,7 +147,8 @@
 {% else %}
     <div class="admin-tree" data-controller="admin-tree"
          data-admin-tree-entity-value="{{ entity }}"
-         data-admin-tree-sortable-value="{{ maySort ? 'true' : 'false' }}">
+         data-admin-tree-sortable-value="{{ maySort ? 'true' : 'false' }}"
+{%- if maySort %} data-admin-tree-token-value="{{ token }}"{% endif %}>
 {{ _self.branch(nodes, mayDelete, maySort) }}
     </div>
 {% endif %}

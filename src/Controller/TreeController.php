@@ -92,6 +92,17 @@ final class TreeController
         $base = $manager->getPrefix().'/tree/'.MenuBuilder::entityToUrl($name);
 
         if ($request->isMethod('POST')) {
+            /*
+             * THE DISCRIMINATOR SITS ON THE NEW PATH, NOT ON THE OLD ONE. The delete form posts
+             * `id` and `_token` and nothing else, and it has done so since 004-001-0005 — adding
+             * a required `action` to it would have changed a contract the gate already holds.
+             * So a move says that it is one, and everything else on this route is still a
+             * delete.
+             */
+            if ($request->request->get('action') === 'move') {
+                return $this->move($request, $name, $base);
+            }
+
             return $this->delete($request, $name, $base);
         }
 
@@ -252,6 +263,144 @@ final class TreeController
     }
 
     /**
+     * Moving one node: a new position among its siblings, and possibly a new parent.
+     *
+     * THE WHOLE TARGET LEVEL IS REWRITTEN, NOT THE ONE NODE THAT MOVED (ADR 0026 §3), and the
+     * reason is measured rather than cautious: `BaseSortable::$sorting` is pre-set to `0` and the
+     * core sets nothing on create, so three freshly created siblings all carry `0` and come back
+     * in an order the database picked — created `a`, `b`, `c`, answered `a`, `c`, `b` (gap
+     * `L33`, schema contract 10.1). There is no existing sequence to insert a single value into.
+     *
+     * THE SOURCE LEVEL IS DELIBERATELY *NOT* RENUMBERED, and ADR 0026 §3 was corrected on
+     * 26.10.2026 to say so. Its original reasoning — "a gap left behind becomes the next tie" —
+     * is simply wrong: `1, 3` has a gap but is still a total order, while a tie needs two *equal*
+     * values. Renumbering it was therefore cosmetic, and measured it was not free: with
+     * `writable = OWN` the source level is usually full of other editors' records, every one of
+     * them would be written, and `multiupdate` refuses the whole move for them — so an editor
+     * could not move their own node *out* of a shared level at all. Measured both ways: the same
+     * call without the source level succeeds (`200`, parent set), with it the core refuses. Gaps
+     * also heal themselves, because the next node moved *into* that level renumbers it `1..n`.
+     *
+     * ONE `multiupdate`, NOT ONE `update` PER NODE. `ApiController::multiupdateAction()` wraps
+     * the whole loop in `beginTransaction()` … `commit()` — measured: one valid object plus one
+     * invented id answers `404` and leaves the valid change **rolled back**. That is exactly the
+     * "jump back" this story asks for, so it comes from the core instead of being rebuilt here.
+     * A loop of single calls would commit each on its own and leave a half-renumbered level.
+     *
+     * ONLY THE MOVED NODE CARRIES `treeParent`. Measured: `treeParent: ''` and `treeParent: null`
+     * both set `parent_id` to NULL and make the node a root, while *omitting* the key leaves the
+     * parent untouched. The renumbered siblings therefore must not carry it — sending it for them
+     * would re-assert a parent the editor never touched, and gap `L32` makes that unsafe: a
+     * parent the editor cannot read is silently written as NULL and still answered with success.
+     *
+     * A SUCCESS ANSWER IS NOT PROOF, for that same reason. The tree is re-read afterwards and the
+     * node's actual parent compared against the requested one; only then is the move reported as
+     * done (ADR 0025 §5 and ADR 0026 §4).
+     */
+    private function move(Request $request, string $name, string $base): Response
+    {
+        if (!FormToken::verify($request)) {
+            return self::back($base, array('moved' => 'expired'));
+        }
+
+        /*
+         * THE RIGHT AND THE SCHEMA ARE CHECKED HERE, NOT ONLY WHERE THE HANDLE IS DRAWN. The
+         * template renders no drag attributes without both (004-002-0002), but a hidden control
+         * secures nothing — this is the half that closes the data (ADR 0019, ADR 0026 §5).
+         */
+        if (!$this->mayWrite($name)) {
+            return self::back($base, array('moved' => 'forbidden'));
+        }
+
+        if (!self::isSortable($this->app[SchemaClient::CONTAINER_KEY]->getSchema(), $name)) {
+            return self::back($base, array('moved' => 'unsortable'));
+        }
+
+        $id = $request->request->get('id');
+
+        if (!is_string($id) || $id === '') {
+            return self::back($base, array('moved' => 'missing'));
+        }
+
+        $rows = $this->treeRows($request, $name);
+        $node = self::findInTree($rows, $id);
+
+        if ($node === null) {
+            return self::back($base, array('moved' => 'missing'));
+        }
+
+        $parent = $request->request->get('parent');
+        $parent = is_string($parent) ? $parent : '';
+
+        /*
+         * ONE CHECK FOR THREE FAILURES, as `FormController` does it for the preset parent: an id
+         * that is not in *this* editor's tree is either not a record of this entity, or not
+         * readable, or `isIntern` — and all three have to fail the same way. Telling them apart
+         * would say something about records the editor cannot see.
+         */
+        if ($parent !== '' && self::findInTree($rows, $parent) === null) {
+            return self::back($base, array('moved' => 'missing'));
+        }
+
+        /*
+         * THE SUBTREE REFUSAL IS THE ONE THAT CANNOT BE SKIPPED (gap `L31`). The core accepts a
+         * cycle without a word, writes it, and because `treeSort()` only descends from rows with
+         * an empty `parent_id` the whole connected component of the cycle is unreachable
+         * afterwards — measured: `multiupdate` answers `200`, the cycle really is in `pim_tree`,
+         * and ten nodes became seven with no error anywhere (schema contract 10.4).
+         */
+        if ($parent !== '' && in_array($parent, self::subtreeIds($node), true)) {
+            return self::back($base, array('moved' => 'cycle'));
+        }
+
+        $target = array_values(array_diff(self::siblingIds($rows, $parent), array($id)));
+
+        $position = (int) $request->request->get('position', '0');
+        $position = max(0, min($position, count($target)));
+
+        array_splice($target, $position, 0, array($id));
+
+        $objects = array();
+
+        foreach ($target as $index => $one) {
+            $data = array('sorting' => $index + 1);
+
+            if ($one === $id) {
+                $data[self::PARENT_PROPERTY] = $parent;
+            }
+
+            $objects[] = array('entity' => $name, 'id' => $one, 'data' => $data);
+        }
+
+        $envelope = $this->call($request, '/api/multiupdate', array('objects' => $objects));
+
+        /*
+         * RE-READ, THEN JUDGE. `$envelope['ok']` says the core committed; it does not say the
+         * node is where it was asked to go (gap `L32`). The difference is a whole report: a move
+         * the core accepted but whose parent it dropped leaves the editor with a root node and
+         * no complaint anywhere.
+         */
+        $after  = $this->treeRows($request, $name);
+        $landed = self::parentIdOf($after, $id);
+        $wanted = $parent === '' ? null : $parent;
+
+        if ($envelope['ok'] && $landed === $wanted) {
+            return self::back($base, array('moved' => 'ok'));
+        }
+
+        if ($envelope['ok']) {
+            return self::back($base, array('moved' => 'dropped'));
+        }
+
+        $code = is_array($envelope['error']) ? ($envelope['error']['code'] ?? '') : '';
+
+        return self::back($base, array(
+            'moved' => 'failed',
+            'code'  => is_string($code) ? $code : '',
+        ));
+    }
+
+    /**
      * One sub-request to the core, with its answer read as an envelope (ADR 0014).
      *
      * Its own helper rather than a shared one, as in `FileController` and for the reason the dev
@@ -302,6 +451,11 @@ final class TreeController
         $count = (int) $request->query->get('count', '0');
         $total = (int) $request->query->get('total', '0');
         $code  = (string) $request->query->get('code', '');
+        $moved = $request->query->get('moved');
+
+        if (is_string($moved) && $moved !== '') {
+            return self::moveReport($moved, $code);
+        }
 
         if (!is_string($done) || $done === '') {
             return null;
@@ -329,6 +483,63 @@ final class TreeController
             case 'missing':
                 return array('ok' => false, 'text' =>
                     'Der Knoten ist nicht mehr da — möglicherweise hat ihn jemand anderes gelöscht.');
+            default:
+                return null;
+        }
+    }
+
+    /**
+     * The sentence the page shows about the move that just ran.
+     *
+     * NO SENTENCE CLAIMS MORE THAN WAS CHECKED, and three of these seven exist only because the
+     * core makes them reachable. `cycle` says what would have happened, because the damage it
+     * prevents is invisible — the branch would simply be gone from the admin (gap `L31`).
+     * `dropped` is the case the core answers with success while silently writing no parent at
+     * all (gap `L32`): the move "worked" and the node is somewhere else than asked, so the
+     * editor is told exactly that instead of being congratulated. `failed` says plainly that
+     * nothing changed, and it may say so because `multiupdate` runs in one transaction — that
+     * is measured (schema contract 10.2), not hoped for.
+     *
+     * @return array{ok: bool, text: string}|null
+     */
+    private static function moveReport(string $moved, string $code): ?array
+    {
+        $system = $code === '' ? '' : ' Meldung des Systems: '.$code;
+
+        switch ($moved) {
+            case 'ok':
+                return array('ok' => true, 'text' =>
+                    'Der Knoten wurde verschoben. Die Reihenfolge dieser Ebene ist damit '
+                    .'festgeschrieben — vorher stand sie nicht fest.');
+            case 'cycle':
+                return array('ok' => false, 'text' =>
+                    'Ein Knoten kann nicht unter sich selbst oder unter einen seiner '
+                    .'Unterknoten gehängt werden: der ganze Ast wäre danach aus der Oberfläche '
+                    .'verschwunden. Es wurde nichts geändert.');
+            case 'dropped':
+                return array('ok' => false, 'text' =>
+                    'Der Vorgang wurde angenommen, der Zielknoten aber nicht übernommen — der '
+                    .'Knoten steht jetzt woanders als angefordert. Der Baum unten zeigt den '
+                    .'gespeicherten Stand.'.$system);
+            case 'failed':
+                return array('ok' => false, 'text' =>
+                    'Das Verschieben wurde abgelehnt. Es wurde nichts geändert — der Baum unten '
+                    .'zeigt den gespeicherten Stand.'.$system);
+            case 'forbidden':
+                return array('ok' => false, 'text' =>
+                    'Für das Verschieben fehlt dir die Berechtigung.');
+            case 'unsortable':
+                return array('ok' => false, 'text' =>
+                    'Diese Datenart führt keine eigene Reihenfolge — ihre Knoten lassen sich '
+                    .'nicht umsortieren.');
+            case 'expired':
+                return array('ok' => false, 'text' =>
+                    'Das Formular war abgelaufen — es wurde nichts verschoben. Bitte erneut '
+                    .'versuchen.');
+            case 'missing':
+                return array('ok' => false, 'text' =>
+                    'Der Knoten oder die Zielstelle ist nicht mehr da — möglicherweise hat '
+                    .'jemand anderes den Baum geändert. Es wurde nichts verschoben.');
             default:
                 return null;
         }
