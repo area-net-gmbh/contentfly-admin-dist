@@ -6,12 +6,15 @@ namespace Areanet\ContentflyAdmin\Controller;
 
 use Areanet\ContentflyAdmin\AdminManager;
 use Areanet\ContentflyAdmin\Asset\Importmap;
+use Areanet\ContentflyAdmin\Auth\FormToken;
+use Areanet\ContentflyAdmin\Schema\Envelope;
 use Areanet\ContentflyAdmin\Schema\SchemaClient;
 use Areanet\ContentflyAdmin\View\EntityView;
 use Areanet\ContentflyAdmin\View\MenuBuilder;
 use Areanet\ContentflyAdmin\View\TemplateRenderer;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\HttpKernelInterface;
 
 /**
  * The records of one `BaseTree` entity, as a tree.
@@ -86,6 +89,12 @@ final class TreeController
             return new Response('', 404);
         }
 
+        $base = $manager->getPrefix().'/tree/'.MenuBuilder::entityToUrl($name);
+
+        if ($request->isMethod('POST')) {
+            return $this->delete($request, $name, $base);
+        }
+
         $listUrl = $manager->getPrefix().'/list/'.MenuBuilder::entityToUrl($name);
         $formBase = $manager->getPrefix().'/form/'.MenuBuilder::entityToUrl($name);
 
@@ -99,7 +108,32 @@ final class TreeController
          */
         $rows = $this->treeRows($request, $name);
 
-        $nodes = self::nodes($rows, self::labelProperty($schema, $name), $formBase);
+        $label = self::labelProperty($schema, $name);
+        $nodes = self::nodes($rows, $label, $formBase);
+
+        /*
+         * THE CONFIRMATION IS A PAGE OF ITS OWN STATE, not a dialog the browser puts up. A
+         * `confirm()` is the only barrier JavaScript can offer, and a delete whose only barrier
+         * is JavaScript has none without it — so the link asks for this page, the page asks the
+         * question, and only its form deletes (story 004-001-0005).
+         */
+        $confirm = null;
+        $wanted  = $request->query->get('delete');
+
+        if (is_string($wanted) && $wanted !== '' && $this->mayDelete($name)) {
+            $node = self::findInTree($rows, $wanted);
+
+            if ($node !== null) {
+                $confirm = array(
+                    'id'          => $wanted,
+                    'label'       => self::nodeLabel($node, $label),
+                    'descendants' => self::descendantCount($node),
+                    'action'      => $base,
+                );
+            }
+        }
+
+        $token = FormToken::issue($request);
 
         $html = $this->app[TemplateRenderer::CONTAINER_KEY]->render('tree.html.twig', array(
             'title'      => $name.' — '.$manager->getTitle(),
@@ -111,10 +145,199 @@ final class TreeController
             'listUrl'    => $listUrl,
             'newUrl'     => $formBase,
             'nodes'      => $nodes,
+            'mayDelete'  => $this->mayDelete($name),
+            'confirm'    => $confirm,
+            'report'     => self::report($request),
+            'token'      => $token,
             'controllers' => array('admin-tree' => 'admin/tree'),
         ));
 
-        return new Response($html, 200, array('Content-Type' => 'text/html; charset=UTF-8'));
+        $response = new Response($html, 200, array('Content-Type' => 'text/html; charset=UTF-8'));
+
+        /*
+         * The token's cookie is set once per session, exactly as the list and the form view set
+         * it: this page posts the delete, and without the cookie `FormToken::verify()` would have
+         * nothing to compare the field against.
+         */
+        if (!FormToken::isIssued($request, $token)) {
+            $response->headers->setCookie(FormToken::cookie($request, $token, $manager->getPrefix()));
+        }
+
+        return $response;
+    }
+
+    /**
+     * Deleting one node — and, unavoidably, everything below it.
+     *
+     * THE COUNT IS NAMED BECAUSE THE CORE IS RECURSIVE, and that is measured, not assumed:
+     * `Api::doDelete()` collects a tree entity's children over `treeParent` and calls itself per
+     * child, so the children are *deleted* and never become root nodes — the `onDelete: SET NULL`
+     * on `BaseTree::$treeParent` never fires, because the ORM removes the children first. A
+     * confirmation that only said "has children" would promise the opposite of what happens.
+     * Whoever shortens this to a cheaper sentence should read gap L29 first.
+     *
+     * A REJECTION IS REPORTED AS A PARTIAL CHANGE, NOT AS "NOTHING HAPPENED" (ADR 0025 §5). There
+     * is no transaction around the recursion and every step flushes on its own, so a mixed
+     * subtree can lose part of itself before the first refusal — measured, and measured as
+     * *nondeterministic*: the children come from `findBy()` without `orderBy`, so with UUID keys
+     * two identical trees can end differently. This method therefore does not guess. It counts
+     * the subtree before the write and counts again afterwards, and reports the difference it
+     * actually finds.
+     */
+    private function delete(Request $request, string $name, string $base): Response
+    {
+        if (!FormToken::verify($request)) {
+            return self::back($base, array('done' => 'expired'));
+        }
+
+        $id = $request->request->get('id');
+
+        if (!is_string($id) || $id === '') {
+            return self::back($base, array('done' => 'missing'));
+        }
+
+        /*
+         * THE RIGHT IS CHECKED HERE AND NOT ONLY WHERE THE BUTTON IS DRAWN. The tree hides the
+         * action without the delete permission, but hiding a control secures nothing — this is
+         * the half that closes the data (ADR 0019).
+         */
+        if (!$this->mayDelete($name)) {
+            return self::back($base, array('done' => 'forbidden'));
+        }
+
+        $before = self::findInTree($this->treeRows($request, $name), $id);
+
+        if ($before === null) {
+            return self::back($base, array('done' => 'missing'));
+        }
+
+        $ids      = self::subtreeIds($before);
+        $envelope = $this->call($request, '/api/delete', array('entity' => $name, 'id' => $id));
+
+        /*
+         * COUNTED AGAIN AFTER THE WRITE, whatever the core answered. On success this confirms the
+         * number the confirmation promised; on a refusal it is the only way to tell the editor
+         * whether anything went, and the measurement says it sometimes does.
+         */
+        $after    = $this->treeRows($request, $name);
+        $survived = 0;
+
+        foreach ($ids as $one) {
+            if (self::findInTree($after, $one) !== null) {
+                ++$survived;
+            }
+        }
+
+        $removed = max(0, count($ids) - $survived);
+
+        if ($envelope['ok'] && $survived === 0) {
+            return self::back($base, array('done' => 'deleted', 'count' => (string) $removed));
+        }
+
+        $code = is_array($envelope['error']) ? ($envelope['error']['code'] ?? '') : '';
+
+        return self::back($base, array(
+            'done'    => $removed === 0 ? 'failed' : 'partial',
+            'count'   => (string) $removed,
+            'total'   => (string) count($ids),
+            'code'    => is_string($code) ? $code : '',
+        ));
+    }
+
+    /**
+     * One sub-request to the core, with its answer read as an envelope (ADR 0014).
+     *
+     * Its own helper rather than a shared one, as in `FileController` and for the reason the dev
+     * guide records: the payload shape is the caller's business, and the server parameters are
+     * carried over so the core checks its per-record permission against the guarded main
+     * request's `auth.user`.
+     *
+     * @param array<string,mixed> $payload
+     *
+     * @return array{ok: bool, readable: bool, data: mixed, error: array<string,mixed>|null}
+     */
+    private function call(Request $request, string $endpoint, array $payload): array
+    {
+        $sub      = Request::create($endpoint, 'POST', $payload, array(), array(), $request->server->all());
+        $response = $this->app->handle($sub, HttpKernelInterface::SUB_REQUEST);
+
+        return Envelope::read($response->getContent(), $response->getStatusCode());
+    }
+
+    /**
+     * Back to the tree, as a redirect, with the report in the query.
+     *
+     * 303 AND NOT 302, so a reload of the destination is a GET and cannot repeat the delete. The
+     * redirect is also what re-reads the tree: after a delete the page shows what is stored, never
+     * a list this controller edited in passing (ADR 0025 §5).
+     *
+     * @param array<string,string> $report
+     */
+    private static function back(string $base, array $report): Response
+    {
+        return new Response('', 303, array(
+            'Location' => $report === array() ? $base : $base.'?'.http_build_query($report),
+        ));
+    }
+
+    /**
+     * The sentence the page shows about the delete that just ran, or `null` when none did.
+     *
+     * THE PARTIAL CASE GETS ITS OWN SENTENCE, and it is the reason this method exists rather than
+     * a one-line "worked / did not work". An editor who is told nothing happened, while two of
+     * four nodes are gone, will go looking for the records — not for the rejection.
+     *
+     * @return array{ok: bool, text: string}|null
+     */
+    private static function report(Request $request): ?array
+    {
+        $done  = $request->query->get('done');
+        $count = (int) $request->query->get('count', '0');
+        $total = (int) $request->query->get('total', '0');
+        $code  = (string) $request->query->get('code', '');
+
+        if (!is_string($done) || $done === '') {
+            return null;
+        }
+
+        switch ($done) {
+            case 'deleted':
+                return array('ok' => true, 'text' => $count === 1
+                    ? 'Der Knoten wurde gelöscht.'
+                    : 'Der Knoten und '.($count - 1).' Unterknoten wurden gelöscht.');
+            case 'partial':
+                return array('ok' => false, 'text' =>
+                    'Das Löschen wurde abgelehnt, aber nicht ohne Wirkung: '.$count.' von '
+                    .$total.' Knoten dieses Teilbaums sind entfernt. Der Baum unten zeigt den '
+                    .'gespeicherten Stand.'.($code === '' ? '' : ' Meldung des Systems: '.$code));
+            case 'failed':
+                return array('ok' => false, 'text' =>
+                    'Das Löschen wurde abgelehnt, es wurde nichts entfernt.'
+                    .($code === '' ? '' : ' Meldung des Systems: '.$code));
+            case 'forbidden':
+                return array('ok' => false, 'text' => 'Für das Löschen fehlt dir die Berechtigung.');
+            case 'expired':
+                return array('ok' => false, 'text' =>
+                    'Das Formular war abgelaufen — es wurde nichts gelöscht. Bitte erneut versuchen.');
+            case 'missing':
+                return array('ok' => false, 'text' =>
+                    'Der Knoten ist nicht mehr da — möglicherweise hat ihn jemand anderes gelöscht.');
+            default:
+                return null;
+        }
+    }
+
+    /**
+     * The name of one raw tree row, with the id as the fallback — the rule of `nodes()`, for the
+     * one row that is not rendered as a node but named in a question.
+     *
+     * @param array<string,mixed> $node
+     */
+    private static function nodeLabel(array $node, ?string $label): string
+    {
+        $text = $label === null ? null : ($node[$label] ?? null);
+
+        return is_string($text) && trim($text) !== '' ? $text : (string) ($node['id'] ?? '');
     }
 
     /**

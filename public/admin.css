@@ -1812,3 +1812,66 @@ li {
 .admin-tree__add:hover {
     filter: brightness(var(--admin-hover-dim));
 }
+
+/*
+ * The delete link and the confirmation it leads to (004-001-0005).
+ *
+ * THE CONFIRMATION LOOKS LIKE A WARNING BECAUSE IT IS ONE. The core deletes a node's whole
+ * branch recursively and there is no undo, so this block uses the danger tokens — the same ones
+ * the form's rejections use — rather than reading like an ordinary paragraph.
+ */
+.admin-tree__delete {
+    font-size: 0.8125rem;
+    color: var(--admin-muted);
+}
+
+.admin-tree__delete:hover {
+    color: var(--admin-danger);
+}
+
+.admin-tree__confirm {
+    margin: 1.5rem 0 0;
+    padding: 1rem 1.25rem;
+    border: 1px solid var(--admin-danger);
+    background: var(--admin-danger-surface);
+    color: var(--admin-danger-text);
+}
+
+.admin-tree__confirm-question {
+    margin: 0 0 0.75rem;
+}
+
+.admin-tree__confirm-actions {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin: 0;
+}
+
+.admin-tree__confirm-yes {
+    padding: 0.4375rem 0.875rem;
+    border: 0;
+    background: var(--admin-danger);
+    color: var(--admin-accent-contrast);
+    cursor: pointer;
+}
+
+.admin-tree__confirm-yes:hover {
+    filter: brightness(var(--admin-hover-dim));
+}
+
+.admin-tree__confirm-no {
+    color: var(--admin-danger-text);
+}
+
+.admin-tree__report {
+    margin: 1rem 0 0;
+    padding: 0.625rem 0.875rem;
+    border-left: 3px solid var(--admin-accent);
+}
+
+.admin-tree__report--problem {
+    border-left-color: var(--admin-danger);
+    background: var(--admin-danger-surface);
+    color: var(--admin-danger-text);
+}

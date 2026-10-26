@@ -24,6 +24,12 @@
     the filter, the full-text search and the bulk actions of story 002-004. Removing it does not
     remove a feature from this page — it removes one from the entity.
 
+    THE DELETE ASKS ON A PAGE, NOT IN A BROWSER DIALOG. `confirm()` is the only barrier a script
+    can put in the way, and a delete whose only barrier is a script has none without it — so the
+    link asks for this page with `?delete=<id>`, the page states what the delete would take, and
+    only the form below actually deletes. The number in the question is the measured truth: the
+    core deletes a tree node's children recursively, so the whole branch goes (ADR 0025 §5).
+
     THE CLASSES THIS GATE READS ARE `admin-tree__switch`, `admin-tree__node` AND
     `admin-tree__label`, and naming them here is load-bearing: `tools/harness-baum-pruefen.php`
     (story 004-001-0006) finds the switch, the nodes and their names by exactly these, the way
@@ -43,7 +49,12 @@
 
 {% block bodyAttributes %} class="admin"{% endblock %}
 
-{% macro branch(nodes) %}
+{#
+    A MACRO DOES NOT SEE THE TEMPLATE CONTEXT, so everything it needs is an argument. `mayDelete`
+    was read as a bare variable here first and the page answered 500 — Twig runs with
+    `strict_variables`, which is what turned a silent omission into a loud one.
+#}
+{% macro branch(nodes, mayDelete) %}
     <ul class="admin-tree__list">
 {% for node in nodes %}
         <li class="admin-tree__node">
@@ -61,11 +72,15 @@
                 <a class="admin-tree__label" href="{{ node.url }}">{{ node.label }}</a>
                 <a class="admin-tree__add" href="{{ node.newChildUrl }}"
                    title="Unterknoten unter {{ node.label }} anlegen">Unterknoten anlegen</a>
+{% if mayDelete %}
+                <a class="admin-tree__delete" href="?delete={{ node.id|url_encode }}"
+                   title="{{ node.label }} löschen">Löschen</a>
+{% endif %}
             </div>
 {% if node.childs is not empty %}
             <div class="admin-tree__childs" id="tree-childs-{{ node.id }}"
                  data-admin-tree-target="childs" data-admin-tree-node="{{ node.id }}">
-{{ _self.branch(node.childs) }}
+{{ _self.branch(node.childs, mayDelete) }}
             </div>
 {% endif %}
         </li>
@@ -81,12 +96,36 @@
 
     <p class="admin-tree__switch"><a href="{{ listUrl }}">Als Liste anzeigen</a></p>
 
+{% if report %}
+    <p class="admin-tree__report{% if not report.ok %} admin-tree__report--problem{% endif %}" role="status">{{ report.text }}</p>
+{% endif %}
+
+{% if confirm %}
+    <form class="admin-tree__confirm" method="post" action="{{ confirm.action }}">
+        <input type="hidden" name="_token" value="{{ token }}">
+        <input type="hidden" name="id" value="{{ confirm.id }}">
+        <p class="admin-tree__confirm-question">
+{% if confirm.descendants == 0 %}
+            „{{ confirm.label }}" wirklich löschen?
+{% else %}
+            „{{ confirm.label }}" wirklich löschen? <strong>Der ganze Ast darunter geht mit:
+            {{ confirm.descendants }} weitere{% if confirm.descendants == 1 %}r Knoten{% else %} Knoten{% endif %}.</strong>
+            Das lässt sich nicht zurücknehmen.
+{% endif %}
+        </p>
+        <p class="admin-tree__confirm-actions">
+            <button type="submit" class="admin-tree__confirm-yes">Endgültig löschen</button>
+            <a class="admin-tree__confirm-no" href="{{ confirm.action }}">Abbrechen</a>
+        </p>
+    </form>
+{% endif %}
+
 {% if nodes is empty %}
     <p class="admin-tree__empty">Für diese Datenart gibt es noch keine Einträge.</p>
 {% else %}
     <div class="admin-tree" data-controller="admin-tree"
          data-admin-tree-entity-value="{{ entity }}">
-{{ _self.branch(nodes) }}
+{{ _self.branch(nodes, mayDelete) }}
     </div>
 {% endif %}
 </main>
