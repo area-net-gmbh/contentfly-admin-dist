@@ -53,6 +53,18 @@ final class TreeController
     }
 
     /**
+     * The field that asks for a machine-readable answer instead of the redirect.
+     *
+     * AN EXPLICIT FIELD AND NOT `Accept`, and its own constant rather than `FileController`'s
+     * (ADR 0021, and the same reasoning as `call()` below): the module builds its own body, so
+     * it can state what it wants, and the gate can test either branch without forging headers.
+     */
+    public const FORMAT_FIELD = '_format';
+
+    /** The one value `FORMAT_FIELD` understands. Anything else is the ordinary redirect. */
+    public const FORMAT_JSON = 'json';
+
+    /**
      * One tree entity's records.
      *
      * The route is registered `isSecure = true`, so `auth.user` is set by the time the core is
@@ -300,7 +312,7 @@ final class TreeController
     private function move(Request $request, string $name, string $base): Response
     {
         if (!FormToken::verify($request)) {
-            return self::back($base, array('moved' => 'expired'));
+            return self::moveAnswer($request, $base, 'expired');
         }
 
         /*
@@ -309,24 +321,24 @@ final class TreeController
          * secures nothing — this is the half that closes the data (ADR 0019, ADR 0026 §5).
          */
         if (!$this->mayWrite($name)) {
-            return self::back($base, array('moved' => 'forbidden'));
+            return self::moveAnswer($request, $base, 'forbidden');
         }
 
         if (!self::isSortable($this->app[SchemaClient::CONTAINER_KEY]->getSchema(), $name)) {
-            return self::back($base, array('moved' => 'unsortable'));
+            return self::moveAnswer($request, $base, 'unsortable');
         }
 
         $id = $request->request->get('id');
 
         if (!is_string($id) || $id === '') {
-            return self::back($base, array('moved' => 'missing'));
+            return self::moveAnswer($request, $base, 'missing');
         }
 
         $rows = $this->treeRows($request, $name);
         $node = self::findInTree($rows, $id);
 
         if ($node === null) {
-            return self::back($base, array('moved' => 'missing'));
+            return self::moveAnswer($request, $base, 'missing');
         }
 
         $parent = $request->request->get('parent');
@@ -339,7 +351,7 @@ final class TreeController
          * would say something about records the editor cannot see.
          */
         if ($parent !== '' && self::findInTree($rows, $parent) === null) {
-            return self::back($base, array('moved' => 'missing'));
+            return self::moveAnswer($request, $base, 'missing');
         }
 
         /*
@@ -350,7 +362,7 @@ final class TreeController
          * and ten nodes became seven with no error anywhere (schema contract 10.4).
          */
         if ($parent !== '' && in_array($parent, self::subtreeIds($node), true)) {
-            return self::back($base, array('moved' => 'cycle'));
+            return self::moveAnswer($request, $base, 'cycle');
         }
 
         $target = array_values(array_diff(self::siblingIds($rows, $parent), array($id)));
@@ -384,20 +396,74 @@ final class TreeController
         $landed = self::parentIdOf($after, $id);
         $wanted = $parent === '' ? null : $parent;
 
-        if ($envelope['ok'] && $landed === $wanted) {
-            return self::back($base, array('moved' => 'ok'));
-        }
-
-        if ($envelope['ok']) {
-            return self::back($base, array('moved' => 'dropped'));
-        }
-
         $code = is_array($envelope['error']) ? ($envelope['error']['code'] ?? '') : '';
+        $code = is_string($code) ? $code : '';
 
-        return self::back($base, array(
-            'moved' => 'failed',
-            'code'  => is_string($code) ? $code : '',
-        ));
+        if ($envelope['ok'] && $landed === $wanted) {
+            $outcome = 'ok';
+        } elseif ($envelope['ok']) {
+            $outcome = 'dropped';
+        } else {
+            $outcome = 'failed';
+        }
+
+        return self::moveAnswer(
+            $request,
+            $base,
+            $outcome,
+            $code,
+            $outcome === 'ok' ? self::siblingIds($after, $parent) : array(),
+            $parent
+        );
+    }
+
+    /**
+     * One answer to a move, in the shape the caller asked for (ADR 0021's two-sided answer).
+     *
+     * THE JSON BRANCH HANDS BACK THE ORDER THE SERVER JUST RE-READ, not an acknowledgement. That
+     * is what keeps ADR 0026 §4 intact without a full page load per drag: the module does not
+     * keep the arrangement it dropped, it applies the one that is stored. The two differ whenever
+     * somebody else changed the tree in between — rare, and silently wrong if the module were
+     * trusted instead.
+     *
+     * EVERY EXIT COMES THROUGH HERE, the refusals included. A module that posted JSON and got a
+     * 303 back for "no permission" would read the HTML of the tree page as its answer and
+     * conclude nothing at all.
+     *
+     * @param list<string> $order
+     */
+    private static function moveAnswer(
+        Request $request,
+        string $base,
+        string $outcome,
+        string $code = '',
+        array $order = array(),
+        string $parent = ''
+    ): Response {
+        if (self::wantsJson($request)) {
+            $report = self::moveReport($outcome, $code);
+
+            return new Response(
+                (string) json_encode(array(
+                    'ok'     => $outcome === 'ok',
+                    'text'   => $report === null ? '' : $report['text'],
+                    'parent' => $parent,
+                    'order'  => $order,
+                )),
+                200,
+                array('Content-Type' => 'application/json; charset=UTF-8')
+            );
+        }
+
+        return self::back($base, $code === ''
+            ? array('moved' => $outcome)
+            : array('moved' => $outcome, 'code' => $code));
+    }
+
+    /** Did the caller ask for JSON instead of the redirect? */
+    private static function wantsJson(Request $request): bool
+    {
+        return ($request->request->all()[self::FORMAT_FIELD] ?? null) === self::FORMAT_JSON;
     }
 
     /**

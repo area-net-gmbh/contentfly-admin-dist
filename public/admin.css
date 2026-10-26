@@ -1899,3 +1899,33 @@ li {
     outline-offset: 1px;
     border-radius: 3px;
 }
+
+/*
+ * THE HANDLE'S RULE LIVES HERE EVEN THOUGH THE MODULE CREATES IT, because this is where every
+ * other visual rule of this admin is — the rule about *not* rendering it server-side is about
+ * markup, not about stylesheets.
+ *
+ * NOT A BUTTON, AND THEREFORE NOT FOCUSABLE (ADR 0026 §6). Dragging here answers a pointer and
+ * nothing else; `admin-sortable__handle` is a real `<button>` precisely because it also answers
+ * the arrow keys. Promising a keyboard operation that does not exist is the mistake
+ * 004-001-0003 avoided by refusing `role="tree"`, and this is the same decision.
+ *
+ * `cursor: grab` AND NOT `move`, like the sortable handle: the pointer says what can be done
+ * here, not what will happen to the page.
+ */
+.admin-tree__handle {
+    margin-right: 0.25rem;
+    color: var(--admin-muted);
+    line-height: 1.2;
+    cursor: grab;
+    user-select: none;
+}
+
+.admin-tree__handle:hover {
+    color: var(--admin-text);
+}
+
+/* The node being dragged stays visible but says that it is in motion. */
+.admin-tree__node--dragging {
+    opacity: 0.5;
+}
