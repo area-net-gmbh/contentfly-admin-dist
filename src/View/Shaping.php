@@ -10,10 +10,22 @@ use Areanet\ContentflyAdmin\Schema\ShapingListener;
  * The one reader of this package's own attributes inside a field's schema entry.
  *
  * STAGE 2 OF THE SHAPING CASCADE HAS TWO READERS — the list (`ColumnBuilder`) and the form
- * (`EntityView`) — and every attribute but `showInList` is read by both. Two copies of the
- * lookup is how a label starts working in the form and not in the list, so the lookup lives
- * here once and both call it. ADR 0017 fixes the set at six attributes: `label`, `showInList`,
- * `position`, `hide`, `isFilterable` and `required`.
+ * (`EntityView`) — and both reach for the same lookup. Two copies of it is how a label starts
+ * working in the form and not in the list, so the lookup lives here once and both call it.
+ *
+ * THE ATTRIBUTE CARRIES EIGHT ARGUMENTS (`Attribute\Admin`): `label`, `showInList`, `position`,
+ * `tab`, `readonly`, `hide`, `required` and `rte`. They do not all reach both readers. `label`,
+ * `position` and `hide` do; `showInList` is the list's alone; `tab`, `readonly`, `required` and
+ * `rte` are the form's. The set is fixed across three decisions and not one, which is why no
+ * single ADR enumerates it: ADR 0017 for what stage 2 evaluates in list and form, ADR 0015 for
+ * `tab`, `readonly` and `hide` in the form, ADR 0016 §3 for `rte`.
+ *
+ * `isFilterable` IS NOT ONE OF THEM, although ADR 0017 counts it among the keys stage 2
+ * evaluates — which is why this docblock used to name it here. It is a core key set by
+ * `#[PIM\Config]`, and it sits on the property level of the schema entry, *outside*
+ * `contentflyAdmin`. So `of()` never sees it and nothing in this class can read it; its consumer
+ * is `EntityView::listFilters()`, straight off the schema entry (story `002-004`). Measured in
+ * `005-001-0001`: a property carries `isFilterable` next to `contentflyAdmin`, never inside it.
  *
  * AN ABSENT KEY MEANS "NOT STATED", NEVER "STATED FALSE". The listener writes only the
  * arguments an entity actually gave (`Schema\ShapingListener`), so `showInList` has three
