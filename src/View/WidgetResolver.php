@@ -201,7 +201,7 @@ final class WidgetResolver
             }
         }
 
-        $target = self::target($type, $meta, $entity);
+        $target = self::target($type, $meta);
         if ($target !== null) {
             $definition['target'] = $target;
         }
@@ -212,26 +212,23 @@ final class WidgetResolver
     /**
      * The entity a relation field points at, or `null` for a field that is not a relation.
      *
-     * A RELATION POINTING AT THE ABSTRACT TREE BASE IS READ AS POINTING AT ITS OWN ENTITY, and
-     * that is the one substitution this method makes (ADR 0025 §3). `BaseTree::$treeParent` is a
-     * `ManyToOne` on `BaseTree` itself, so `JoinType::processSchema()` writes
-     * `accept: Areanet\PIM\Entity\BaseTree` — and `pim_tree` is the single JOINED table of
-     * **every** tree entity in the installation. Taken literally, the parent select of a
-     * category would offer the file manager's folders and every other project tree as parents,
-     * and a parent chosen there produces a record the entity's own tree never shows.
+     * `treeParent` NEEDS NO SPECIAL CASE HERE, AND FINDING THAT OUT COST A DETOUR WORTH
+     * RECORDING. The attribute on `BaseTree::$treeParent` names the abstract base
+     * (`targetEntity: 'Areanet\PIM\Entity\BaseTree'`), and `pim_tree` really is the single
+     * JOINED table of every tree entity — so story 004-001-0004 first built a substitution here
+     * that read such a target as the owning entity. It was dead code: `Api::getSchema()`
+     * overwrites `accept` for exactly this property with the concrete class name
+     * (`if($prop->getName() == 'treeParent')`), so the schema already answers
+     * `Custom\Entity\Harness\FeldtypBaum` and never the base. Measured, not assumed — the
+     * substitution was removed when a sabotage run left the gate green.
      *
-     * The precedent is the group narrowing of `checkbox` and `radio` in
-     * `RelationOptions::describe()`: one shared table serving many fields, narrowed from the
-     * schema and never from the request. Here the narrowing is the owning entity, which is why
-     * this method needs to know it.
-     *
-     * IT KEYS ON THE TARGET, NOT ON THE PROPERTY NAME. `treeParent` is what the core calls it
-     * today, but anything else pointing at the abstract base is unusable in exactly the same way
-     * — and a project's own relation on `BaseTree` would be, too.
+     * What the schema cannot answer is which *record* is being edited, and that is what a cycle
+     * depends on. The exclusion of a node's own subtree therefore lives where the record is
+     * known — `FormController::prepare()` and `OptionsController` — and not here.
      *
      * @param array<string,mixed> $meta
      */
-    private static function target(string $type, array $meta, string $entity): ?string
+    private static function target(string $type, array $meta): ?string
     {
         if ($type === 'file' || $type === 'multifile') {
             return self::FILE_ENTITY;
@@ -244,22 +241,7 @@ final class WidgetResolver
             return null;
         }
 
-        return self::isTreeBase($target) ? $entity : $target;
-    }
-
-    /**
-     * Whether this target names the abstract `BaseTree`, however the schema spells it.
-     *
-     * The schema answers a fully qualified name for `join`, a short one for `onejoin` — both
-     * occur on one entity, which is why `RelationOptions::describe()` reconciles them through
-     * the core's own helper. The same two spellings are checked here rather than normalising,
-     * because this is a comparison against one known name and not a lookup.
-     */
-    private static function isTreeBase(string $target): bool
-    {
-        $target = ltrim($target, '\\');
-
-        return $target === 'Areanet\\PIM\\Entity\\BaseTree' || $target === 'PIM\\BaseTree';
+        return $target;
     }
 
     /**
