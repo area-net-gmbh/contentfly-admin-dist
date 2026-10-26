@@ -223,6 +223,15 @@ final class ListController
             'menu'       => $this->app[MenuBuilder::CONTAINER_KEY]->build(),
             'logoutUrl'  => $manager->getPrefix().'/logout',
             'entity'     => $name,
+            /*
+             * THE WAY BACK TO THE TREE, and `null` for every other entity (ADR 0025). A tree
+             * entity's menu entry points at `/tree`, so this list is reachable only through the
+             * switch on that page — without the counterpart here the editor who used it would
+             * have no way back except the browser's history.
+             */
+            'treeUrl'    => $this->app[EntityView::CONTAINER_KEY]->isTree($name)
+                ? $manager->getPrefix().'/tree/'.MenuBuilder::entityToUrl($name)
+                : null,
             'columns'    => self::sortableColumns($columns, $base, $query, $sort, $direction, $page),
             'rows'       => $rows,
             'selection'  => $selection,

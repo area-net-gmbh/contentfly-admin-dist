@@ -339,6 +339,33 @@ final class EntityView
     }
 
     /**
+     * Whether this entity's records form a tree and are therefore edited as one (story 004-001).
+     *
+     * THE SCHEMA ANSWERS THIS, NOT A `class_exists()` CHECK. The core sets
+     * `settings.type` to `tree` for everything descending from `BaseTree` or `BaseI18nTree`
+     * (`Api::getSchema()`), so the question is already answered for every entity the admin can
+     * see — including the ones a project adds. Resolving the entity to a class and asking PHP
+     * about its parents would be a second opinion about the same fact, and it would be the
+     * weaker one: the admin reads the schema, not the project's autoloader.
+     *
+     * IT LIVES HERE BECAUSE THREE CALLERS ASK IT. `MenuBuilder` decides whether an entry points
+     * at the tree or the list, `TreeController` refuses an entity that is not a tree, and
+     * `ListController` offers the switch back. Written three times, those are three chances to
+     * disagree about what a tree is.
+     *
+     * An unknown entity is not a tree. That is the same answer the whitelist and the permission
+     * check give it, and it keeps the callers from needing a third branch.
+     *
+     * @param string $entity Entity name as the schema spells it, e.g. `Harness\FeldtypBaum`
+     */
+    public function isTree(string $entity): bool
+    {
+        $settings = $this->schemaClient->getSchema()[$entity]['settings'] ?? array();
+
+        return is_array($settings) && ($settings['type'] ?? null) === 'tree';
+    }
+
+    /**
      * Whether one field may be offered as a filter at all — the gates before the type is asked.
      *
      * The order is the order of the reasons: the id is the record's address and already its own

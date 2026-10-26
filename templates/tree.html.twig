@@ -1,0 +1,28 @@
+{#
+    One `BaseTree` entity's records, as a tree.
+
+    THE SWITCH TO THE LIST IS PART OF THE PAGE, not a convenience bolted on. A tree entity has
+    exactly one menu entry and it points here (ADR 0025), so this link is the only offered way to
+    the filter, the full-text search and the bulk actions of story 002-004. Removing it does not
+    remove a feature from this page — it removes one from the entity.
+
+    THE CLASSES THIS GATE READS ARE `admin-tree__switch` AND `admin-tree__node`, and naming them
+    here is load-bearing: `tools/harness-baum-pruefen.php` (story 004-001-0006) finds the switch
+    and the nodes by exactly these, the way `harness-liste-pruefen.php` reads the table through
+    `admin-list__cell`. Renaming one without the gate makes the gate read nothing and stay green.
+
+    THE NODES ARRIVE IN 004-001-0003. This page is the route and its frame; the tree itself, its
+    collapsing and the actions on a node are the following tasks. An empty frame is deliberate
+    here — the three gates of `TreeController` are easier to prove on a page that does nothing
+    else.
+#}{% extends 'layout.html.twig' %}
+
+{% block bodyAttributes %} class="admin"{% endblock %}
+
+{% block content %}
+<main class="admin__main">
+    <h1>{{ entity }}</h1>
+
+    <p class="admin-tree__switch"><a href="{{ listUrl }}">Als Liste anzeigen</a></p>
+</main>
+{% endblock %}

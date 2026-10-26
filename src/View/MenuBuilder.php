@@ -51,6 +51,21 @@ use Areanet\ContentflyAdmin\Controller\FileController;
  * It takes the two entity names from `FileController`, which owns the function and is the only
  * other place that must agree about them. Repeating the two strings here is how a menu and a
  * controller start disagreeing about which entity the file manager covers.
+ *
+ * A TREE ENTITY IS LINKED TO THE TREE, NOT TO THE LIST, as of story 004-001 (ADR 0025). The
+ * entry of an entity whose `settings.type` is `tree` points at `/<prefix>/tree/<Entity>`; the
+ * list stays reachable and the tree page links to it, so filter, full-text search and bulk
+ * actions are one click away rather than gone. There is still exactly **one** entry per entity —
+ * a second one beside it is the duplication ADR 0020 removed for the folders.
+ *
+ * `PIM\Folder` IS A TREE AND STILL GETS NO ENTRY. It is skipped above for being the file
+ * manager's left-hand column, and that reason outranks this one: an entry on `/tree/PIM-Folder`
+ * would be the second menu way to the same folders that ADR 0020 argued away.
+ *
+ * WHETHER AN ENTITY IS A TREE IS ASKED OF `EntityView` and not of the schema directly, so that
+ * the menu, `TreeController` and `ListController` cannot drift apart about it. The laziness
+ * promise above still holds: `EntityView` reads nothing when it is constructed, only when it is
+ * asked.
  */
 final class MenuBuilder
 {
@@ -74,10 +89,16 @@ final class MenuBuilder
 
     private PermissionView $permissions;
 
-    public function __construct(AdminManager $manager, PermissionView $permissions)
-    {
+    private EntityView $entityView;
+
+    public function __construct(
+        AdminManager $manager,
+        PermissionView $permissions,
+        EntityView $entityView
+    ) {
         $this->manager     = $manager;
         $this->permissions = $permissions;
+        $this->entityView  = $entityView;
     }
 
     /**
@@ -130,10 +151,17 @@ final class MenuBuilder
                 continue;
             }
 
+            /*
+             * A TREE ENTITY POINTS AT THE TREE (ADR 0025). The segment is the only difference —
+             * one entry either way, so the configured order of the whitelist still decides where
+             * it sits. `PIM\Folder` never reaches this line; it was skipped above.
+             */
+            $area = $this->entityView->isTree($entity) ? '/tree/' : '/list/';
+
             $items[] = array(
                 'entity' => $entity,
                 'label'  => $entity,
-                'url'    => $this->manager->getPrefix().'/list/'.self::entityToUrl($entity),
+                'url'    => $this->manager->getPrefix().$area.self::entityToUrl($entity),
             );
         }
 

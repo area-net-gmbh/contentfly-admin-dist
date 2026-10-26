@@ -76,6 +76,10 @@
 
     <p class="admin-list__new"><a href="{{ newUrl }}">Neuer Datensatz</a></p>
 
+{% if treeUrl %}
+    <p class="admin-tree__switch"><a href="{{ treeUrl }}">Als Baum anzeigen</a></p>
+{% endif %}
+
 {% if report %}
     <p class="admin-list__report{% if not report.ok %} admin-list__report--problem{% endif %}" role="status">{{ report.text }}</p>
 {% endif %}

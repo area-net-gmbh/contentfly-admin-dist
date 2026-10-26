@@ -16,6 +16,7 @@ use Areanet\ContentflyAdmin\Controller\FilePickerController;
 use Areanet\ContentflyAdmin\Controller\FormController;
 use Areanet\ContentflyAdmin\Controller\ListController;
 use Areanet\ContentflyAdmin\Controller\OptionsController;
+use Areanet\ContentflyAdmin\Controller\TreeController;
 use Areanet\ContentflyAdmin\Schema\SchemaClient;
 use Areanet\ContentflyAdmin\Schema\ShapingListener;
 use Areanet\ContentflyAdmin\Schema\VersionGuard;
@@ -193,7 +194,16 @@ final class AdminManager
         };
 
         $this->app[MenuBuilder::CONTAINER_KEY] = static function ($app): MenuBuilder {
-            return new MenuBuilder($app[self::CONTAINER_KEY], $app[PermissionView::CONTAINER_KEY]);
+            /*
+             * `EntityView` ANSWERS WHETHER AN ENTITY IS A TREE (story 004-001). The factories
+             * are lazy, so naming it here constructs objects and reads no schema — the menu
+             * still touches nothing until `build()` is called.
+             */
+            return new MenuBuilder(
+                $app[self::CONTAINER_KEY],
+                $app[PermissionView::CONTAINER_KEY],
+                $app[EntityView::CONTAINER_KEY]
+            );
         };
 
         $this->app[ColumnBuilder::CONTAINER_KEY] = static function ($app): ColumnBuilder {
@@ -508,6 +518,27 @@ final class AdminManager
             ->mount($this->prefix.'/files', FileController::class)
             ->match('', true, 'filesAction')
             ->match('{id}', true, 'detailAction');
+
+        /*
+         * THE TREE GETS A MOUNT OF ITS OWN — the ninth, and for the same reason as the eight
+         * before it: one mount binds one controller class (ADR 0012). A `BaseTree` entity is
+         * addressed as `/<prefix>/tree/<Entity>`, the same shape the list uses, so `MenuBuilder`
+         * only exchanges the segment (ADR 0025).
+         *
+         * `match()` AND NOT `get()`, although nothing posts here yet. Routes within one provider
+         * are keyed by their path, so the delete action of story 004-001-0005 would replace this
+         * reading route instead of adding to it — silently. That is the failure the file manager
+         * paid for once; it is cheaper to open the route for both verbs now than to debug a
+         * vanished page later.
+         *
+         * `isSecure = true`: the tree is read with `Api::getTree2()`, which asks
+         * `Permission::isReadable()` about the `auth.user` that only a guarded request sets —
+         * and which *raises* when the answer is no, which is why `TreeController` checks the
+         * permission before it calls.
+         */
+        $this->app['routeManager']
+            ->mount($this->prefix.'/tree', TreeController::class)
+            ->match('{entity}', true, 'treeAction');
 
         $this->app['routeManager']
             ->mount($this->prefix.'/_asset', AssetController::class)
