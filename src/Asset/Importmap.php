@@ -51,6 +51,7 @@ final class Importmap
         'admin/upload'       => 'controllers/upload_controller.js',
         'admin/file-picker'  => 'controllers/file_picker_controller.js',
         'admin/sortable'     => 'controllers/sortable_controller.js',
+        'admin/tree'         => 'controllers/tree_controller.js',
     );
 
     /**

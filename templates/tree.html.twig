@@ -1,28 +1,85 @@
 {#
     One `BaseTree` entity's records, as a tree.
 
+    THE WHOLE TREE IS IN THE DELIVERED HTML, and the module only folds it up — the same rule
+    `tabs_controller.js` follows and for the same reason. Nodes hidden in CSS and revealed by
+    script would turn a module that fails to load into a tree showing its roots with no sign
+    that anything hangs below them. Without JavaScript every node is visible and every link
+    works; collapsing is the convenience, not the mechanism.
+
+    THE NESTING IS THE MARKUP, not an indent class. A nested `<ul>` inside the `<li>` it belongs
+    to is what makes the structure readable to a screen reader and to the gate; faking depth with
+    a padding class would leave both guessing.
+
+    THERE IS DELIBERATELY NO `role="tree"`. That role commits a widget to the full tree keyboard
+    specification — arrow keys across every node, a roving `tabindex`, Home and End, type-ahead —
+    and a page that announces the role without them is worse off than one that does not: a screen
+    reader tells the user to navigate in a way that then does nothing. What this page actually is
+    is a nested list of links with a disclosure button per branch, so it says that: `<ul>`, `<a>`
+    and a `<button>` carrying `aria-expanded` and `aria-controls`. Native elements, keyboard
+    reachable without a line of script. Upgrading to the real widget is a decision of its own.
+
     THE SWITCH TO THE LIST IS PART OF THE PAGE, not a convenience bolted on. A tree entity has
     exactly one menu entry and it points here (ADR 0025), so this link is the only offered way to
     the filter, the full-text search and the bulk actions of story 002-004. Removing it does not
     remove a feature from this page — it removes one from the entity.
 
-    THE CLASSES THIS GATE READS ARE `admin-tree__switch` AND `admin-tree__node`, and naming them
-    here is load-bearing: `tools/harness-baum-pruefen.php` (story 004-001-0006) finds the switch
-    and the nodes by exactly these, the way `harness-liste-pruefen.php` reads the table through
-    `admin-list__cell`. Renaming one without the gate makes the gate read nothing and stay green.
+    THE CLASSES THIS GATE READS ARE `admin-tree__switch`, `admin-tree__node` AND
+    `admin-tree__label`, and naming them here is load-bearing: `tools/harness-baum-pruefen.php`
+    (story 004-001-0006) finds the switch, the nodes and their names by exactly these, the way
+    `harness-liste-pruefen.php` reads the table through `admin-list__cell`. Renaming one without
+    the gate makes the gate read nothing and stay green.
 
-    THE NODES ARRIVE IN 004-001-0003. This page is the route and its frame; the tree itself, its
-    collapsing and the actions on a node are the following tasks. An empty frame is deliberate
-    here — the three gates of `TreeController` are easier to prove on a page that does nothing
-    else.
+    THE LABEL MAY BE AN ID, and that is the maintained state of the entity showing through:
+    `settings.labelProperty` defaults to null (gap L6) and `TreeController::labelProperty()`
+    answers that with the record's id rather than a guessed field (ADR 0016).
 #}{% extends 'layout.html.twig' %}
 
 {% block bodyAttributes %} class="admin"{% endblock %}
+
+{% macro branch(nodes) %}
+    <ul class="admin-tree__list">
+{% for node in nodes %}
+        <li class="admin-tree__node">
+            <div class="admin-tree__row">
+{% if node.childs is not empty %}
+                <button type="button" class="admin-tree__toggle"
+                        aria-expanded="true"
+                        aria-controls="tree-childs-{{ node.id }}"
+                        data-action="admin-tree#toggle"
+                        data-admin-tree-target="toggle">
+                    <span class="admin-tree__toggle-sign" aria-hidden="true"></span>
+                    <span class="admin-tree__toggle-text">{{ node.label }} zuklappen</span>
+                </button>
+{% endif %}
+                <a class="admin-tree__label" href="{{ node.url }}">{{ node.label }}</a>
+            </div>
+{% if node.childs is not empty %}
+            <div class="admin-tree__childs" id="tree-childs-{{ node.id }}"
+                 data-admin-tree-target="childs" data-admin-tree-node="{{ node.id }}">
+{{ _self.branch(node.childs) }}
+            </div>
+{% endif %}
+        </li>
+{% endfor %}
+    </ul>
+{% endmacro %}
 
 {% block content %}
 <main class="admin__main">
     <h1>{{ entity }}</h1>
 
+    <p class="admin-tree__new"><a href="{{ newUrl }}">Neuer Datensatz</a></p>
+
     <p class="admin-tree__switch"><a href="{{ listUrl }}">Als Liste anzeigen</a></p>
+
+{% if nodes is empty %}
+    <p class="admin-tree__empty">Für diese Datenart gibt es noch keine Einträge.</p>
+{% else %}
+    <div class="admin-tree" data-controller="admin-tree"
+         data-admin-tree-entity-value="{{ entity }}">
+{{ _self.branch(nodes) }}
+    </div>
+{% endif %}
 </main>
 {% endblock %}

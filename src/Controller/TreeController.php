@@ -6,9 +6,11 @@ namespace Areanet\ContentflyAdmin\Controller;
 
 use Areanet\ContentflyAdmin\AdminManager;
 use Areanet\ContentflyAdmin\Asset\Importmap;
+use Areanet\ContentflyAdmin\Schema\SchemaClient;
 use Areanet\ContentflyAdmin\View\EntityView;
 use Areanet\ContentflyAdmin\View\MenuBuilder;
 use Areanet\ContentflyAdmin\View\TemplateRenderer;
+use Areanet\PIM\Classes\Api;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -85,6 +87,19 @@ final class TreeController
         }
 
         $listUrl = $manager->getPrefix().'/list/'.MenuBuilder::entityToUrl($name);
+        $formBase = $manager->getPrefix().'/form/'.MenuBuilder::entityToUrl($name);
+
+        $schema = $this->app[SchemaClient::CONTAINER_KEY]->getSchema();
+
+        /*
+         * READ IN-PROCESS, NEVER OVER HTTP (ADR 0006), and `getTree2()` rather than `getTree()`:
+         * the first reads the whole tree in one query, the second calls itself once per node
+         * (ADR 0025). The permission was checked above, which is what keeps this call from
+         * raising instead of answering.
+         */
+        $rows = (new Api($this->app, $request))->getTree2($name);
+
+        $nodes = self::nodes(is_array($rows) ? $rows : array(), self::labelProperty($schema, $name), $formBase);
 
         $html = $this->app[TemplateRenderer::CONTAINER_KEY]->render('tree.html.twig', array(
             'title'      => $name.' — '.$manager->getTitle(),
@@ -94,8 +109,87 @@ final class TreeController
             'logoutUrl'  => $manager->getPrefix().'/logout',
             'entity'     => $name,
             'listUrl'    => $listUrl,
+            'newUrl'     => $formBase,
+            'nodes'      => $nodes,
+            'controllers' => array('admin-tree' => 'admin/tree'),
         ));
 
         return new Response($html, 200, array('Content-Type' => 'text/html; charset=UTF-8'));
+    }
+
+    /**
+     * The property that names a record, or `null` when the entity does not say.
+     *
+     * THE SAME RULE THE RELATION SELECT USES, and deliberately not a better one. `labelProperty`
+     * defaults to `null` (gap L6) and `RelationOptions::describe()` answers that case with the
+     * record's id — a guessed first `string` field was considered for the select and rejected in
+     * ADR 0016, because a guessed label is indistinguishable from a maintained one and hides the
+     * fact that nobody maintained it. A tree of ids is ugly on purpose.
+     *
+     * A name pointing at a property the entity does not have counts as not set, exactly as it
+     * does there: the value would never arrive in the row.
+     *
+     * @param array<string,mixed> $schema
+     */
+    private static function labelProperty(array $schema, string $entity): ?string
+    {
+        $label = $schema[$entity]['settings']['labelProperty'] ?? null;
+
+        if (!is_string($label) || $label === '') {
+            return null;
+        }
+
+        return isset($schema[$entity]['properties'][$label]) ? $label : null;
+    }
+
+    /**
+     * The rows of `Api::getTree2()`, turned into what the template prints.
+     *
+     * THE TEMPLATE NEVER SEES A CORE ROW. `getTree2()` answers raw database columns — every
+     * scalar property of the entity, the accounting fields included, and `join`/`file` as
+     * `array('id' => …)` (schema contract section 9.1). Handing that to Twig would put the
+     * decision which of them is printable into the template.
+     *
+     * `isIntern` IS FILTERED HERE, AND THE SUBTREE GOES WITH IT (ADR 0025 §4). `getTree2()` does
+     * not filter it although `getTree()` and `Api::getList()` do (gap L28) — unfiltered, the tree
+     * would show records the list of the same entity never shows, and no editor can tell that
+     * apart from a bug. Dropping the subtree with the node is not a second rule: it is what the
+     * core itself does with `OWN`/`GROUP`, where `treeSort()` descends from the roots and a child
+     * under a dropped parent is dropped too.
+     *
+     * @param list<array<string,mixed>> $rows
+     *
+     * @return list<array{id: string, label: string, url: string, childs: list<array<string,mixed>>}>
+     */
+    private static function nodes(array $rows, ?string $label, string $formBase): array
+    {
+        $nodes = array();
+
+        foreach ($rows as $row) {
+            if (!is_array($row) || !empty($row['isIntern'])) {
+                continue;
+            }
+
+            $id = $row['id'] ?? null;
+
+            if (!is_string($id) && !is_int($id)) {
+                continue;
+            }
+
+            $id   = (string) $id;
+            $text = $label === null ? null : ($row[$label] ?? null);
+            $text = is_string($text) && trim($text) !== '' ? $text : $id;
+
+            $childs = $row['childs'] ?? array();
+
+            $nodes[] = array(
+                'id'     => $id,
+                'label'  => $text,
+                'url'    => $formBase.'/'.rawurlencode($id),
+                'childs' => self::nodes(is_array($childs) ? $childs : array(), $label, $formBase),
+            );
+        }
+
+        return $nodes;
     }
 }

@@ -1688,3 +1688,112 @@ li {
 .admin-file__meta-form .admin-form__field {
     margin: 0 0 1rem;
 }
+
+/*
+ * The tree of a `BaseTree` entity (004-001-0003).
+ *
+ * NO COLOUR VALUE HERE, only `var(--admin-*)` — the branding layer is the whole reason the
+ * stylesheet has one, and one literal in the body takes it away.
+ *
+ * THE INDENT HANGS ON THE NESTED CONTAINER, not on a depth class. The markup nests, so one rule
+ * indents every level and a tree ten deep needs no tenth rule.
+ */
+.admin-tree {
+    margin: 1.5rem 0 0;
+}
+
+.admin-tree__list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.admin-tree__childs {
+    margin: 0;
+    padding-left: 1.25rem;
+    border-left: 1px solid var(--admin-rule);
+}
+
+.admin-tree__row {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.125rem 0;
+}
+
+/*
+ * THE TOGGLE IS A BUTTON AND KEEPS LOOKING LIKE ONE TO THE KEYBOARD. Only the chrome is removed;
+ * the focus ring stays, because it is the only thing that says where you are when tabbing
+ * through a deep tree.
+ */
+.admin-tree__toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.25rem;
+    height: 1.25rem;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--admin-muted);
+    cursor: pointer;
+}
+
+.admin-tree__toggle:hover {
+    filter: brightness(var(--admin-hover-dim));
+}
+
+/*
+ * The sign is drawn, not written: a character would be a glyph the project's font may not have,
+ * and an icon file would be a fifth deliverable asset.
+ */
+.admin-tree__toggle-sign {
+    display: block;
+    width: 0;
+    height: 0;
+    border-left: 0.3125rem solid currentColor;
+    border-top: 0.3125rem solid transparent;
+    border-bottom: 0.3125rem solid transparent;
+    transform: rotate(90deg);
+}
+
+.admin-tree__toggle--folded .admin-tree__toggle-sign {
+    transform: none;
+}
+
+/*
+ * The button's label is for screen readers only. `display: none` would take it out of the
+ * accessibility tree along with the visual layout, which is the opposite of the intent.
+ */
+.admin-tree__toggle-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+/*
+ * A LEAF LINES UP WITH ITS SIBLINGS THAT HAVE A TOGGLE. Without the spacer a branch and a leaf
+ * on the same level would start at two different offsets and the level would stop reading as one.
+ */
+.admin-tree__node .admin-tree__row > .admin-tree__label:first-child {
+    margin-left: 1.625rem;
+}
+
+.admin-tree__label {
+    color: var(--admin-text);
+}
+
+.admin-tree__new,
+.admin-tree__switch {
+    margin: 0 0 0.5rem;
+}
+
+.admin-tree__empty {
+    margin: 1.5rem 0 0;
+    color: var(--admin-muted);
+}
