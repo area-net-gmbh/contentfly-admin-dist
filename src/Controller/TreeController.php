@@ -106,7 +106,7 @@ final class TreeController
         if ($request->isMethod('POST')) {
             /*
              * THE DISCRIMINATOR SITS ON THE NEW PATH, NOT ON THE OLD ONE. The delete form posts
-             * `id` and `_token` and nothing else, and it has done so since 004-001-0005 — adding
+             * `id` and the CSRF field and nothing else, and it has done so since 004-001-0005 — adding
              * a required `action` to it would have changed a contract the gate already holds.
              * So a move says that it is one, and everything else on this route is still a
              * delete.
@@ -178,6 +178,7 @@ final class TreeController
             'maySort'    => $this->mayWrite($name) && self::isSortable($schema, $name),
             'confirm'    => $confirm,
             'report'     => self::report($request),
+            'tokenField' => FormToken::FIELD,
             'token'      => $token,
             'controllers' => array('admin-tree' => 'admin/tree'),
         ));

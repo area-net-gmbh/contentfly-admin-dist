@@ -35,8 +35,21 @@ final class FormToken
      */
     public const COOKIE_NAME = 'contentfly_admin_form';
 
-    /** The hidden field carrying the same value back. */
-    public const FIELD = '_token';
+    /**
+     * The hidden field carrying the same value back.
+     *
+     * NOT `_token`, AND THAT NAME IS PERMANENTLY OUT OF BOUNDS HERE. The core reads `_token` as
+     * an *access* token — `TokenSources::PARAMETER_ALT`, from the query string and from the
+     * request body alike. A CSRF token under that name therefore looks like a credential to the
+     * core: `AdminAuthenticator::applyTokenHeader()` sees a request that already carries a token
+     * and leaves the session cookie untranslated, the core authenticates against the CSRF value,
+     * fails, and the editor lands on the login screen. Every form POST of this package was
+     * affected, and no gate saw it, because gates sign in by header — see
+     * `tools/harness-browserweg-pruefen.php` and ADR 0030.
+     *
+     * A CSRF token is not a credential. It must not occupy a name the core's token chain reads.
+     */
+    public const FIELD = '_csrf';
 
     /**
      * The value the next form should carry — the one already in the browser, or a fresh one.

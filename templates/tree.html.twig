@@ -52,7 +52,7 @@
     markup byte-identical to before this story wherever dragging is not on offer.
 
     THE TOKEN IS IN THE MARKUP BECAUSE THERE IS NO FORM TO CARRY IT (story 004-002-0003). Every
-    other write on this page is a form, and the delete renders `_token` as a field — but a move
+    other write on this page is a form, and the delete renders the CSRF field — but a move
     is posted by the module, and the token's cookie is `HttpOnly` on purpose, so nothing in the
     browser can read it there. `FormToken` is built for exactly this: the *server* renders the
     value, the browser only hands it back. It is emitted only with `maySort`, so a page that
@@ -124,7 +124,7 @@
 
 {% if confirm %}
     <form class="admin-tree__confirm" method="post" action="{{ confirm.action }}">
-        <input type="hidden" name="_token" value="{{ token }}">
+        <input type="hidden" name="{{ tokenField }}" value="{{ token }}">
         <input type="hidden" name="id" value="{{ confirm.id }}">
         <p class="admin-tree__confirm-question">
 {% if confirm.descendants == 0 %}
@@ -148,7 +148,7 @@
     <div class="admin-tree" data-controller="admin-tree"
          data-admin-tree-entity-value="{{ entity }}"
          data-admin-tree-sortable-value="{{ maySort ? 'true' : 'false' }}"
-{%- if maySort %} data-admin-tree-token-value="{{ token }}"{% endif %}>
+{%- if maySort %} data-admin-tree-token-value="{{ token }}" data-admin-tree-token-field-value="{{ tokenField }}"{% endif %}>
 {{ _self.branch(nodes, mayDelete, maySort) }}
     </div>
 {% endif %}

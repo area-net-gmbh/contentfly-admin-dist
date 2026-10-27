@@ -55,7 +55,7 @@ import { Controller } from '@hotwired/stimulus';
 export default class extends Controller {
     static targets = ['toggle', 'childs'];
 
-    static values = { entity: String, sortable: Boolean, token: String };
+    static values = { entity: String, sortable: Boolean, token: String, tokenField: String };
 
     connect() {
         this.folded = this.read();
@@ -339,7 +339,7 @@ export default class extends Controller {
     send(id, parent, position) {
         const body = new FormData();
 
-        body.set('_token', this.tokenValue);
+        body.set(this.tokenFieldValue, this.tokenValue);
         body.set('_format', 'json');
         body.set('action', 'move');
         body.set('id', id);
