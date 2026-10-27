@@ -17,8 +17,9 @@ use Symfony\Component\HttpFoundation\Response;
  *
  * WHAT AN ACTION IS: one class with `#[AdminRowAction]` and one `__invoke(array $ids)`. No
  * constructor, no version check, no permission check, no token check, no id parsing. The ids
- * arrive ready — integers, free of duplicates, never empty — and whatever `Response` the method
- * returns is delivered unchanged.
+ * arrive ready — free of duplicates, never empty — and whatever `Response` the method returns
+ * is delivered unchanged. They are strings, as a record id is everywhere else in this package:
+ * the list carries a row's `id` as `string|null` and `BulkController` dedupes on the string.
  *
  * NOT `AbstractAdminPage`, ALTHOUGH CONCEPT SECTION 9 SHOWS EXACTLY THAT. A page's base class is
  * cut for a page: its entry point runs towards an argument-less method, it assembles the layout
@@ -60,8 +61,8 @@ abstract class AbstractRowAction
     /**
      * The action itself — one record or many, the same code.
      *
-     * @param list<int> $ids The records to act on. Never empty: an empty selection is turned
-     *                       back at the list before anything is constructed.
+     * @param list<string> $ids The records to act on. Never empty: an empty selection is turned
+     *                          back at the list before anything is constructed.
      */
     abstract public function __invoke(array $ids): Response;
 
@@ -80,7 +81,7 @@ abstract class AbstractRowAction
      * action route answers with a bare 403. This is reached by POST from a form, so a rendered
      * page would be returned into a Turbo navigation that asked for a file.
      *
-     * @param list<int> $ids
+     * @param list<string> $ids
      *
      * @internal Called by the admin's row-action dispatcher. Not part of the project-facing
      *           contract.

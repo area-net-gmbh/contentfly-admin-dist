@@ -17,8 +17,10 @@ use Areanet\ContentflyAdmin\Controller\FormController;
 use Areanet\ContentflyAdmin\Controller\ListController;
 use Areanet\ContentflyAdmin\Controller\OptionsController;
 use Areanet\ContentflyAdmin\Controller\PageController;
+use Areanet\ContentflyAdmin\Controller\RowActionController;
 use Areanet\ContentflyAdmin\Controller\TreeController;
 use Areanet\ContentflyAdmin\Page\PageRegistry;
+use Areanet\ContentflyAdmin\Page\RowActionRegistry;
 use Areanet\ContentflyAdmin\Schema\SchemaClient;
 use Areanet\ContentflyAdmin\Schema\ShapingListener;
 use Areanet\ContentflyAdmin\Schema\VersionGuard;
@@ -78,6 +80,7 @@ final class AdminManager
         'thumbnailAliases' => [],
         'uploadAccept'   => '',
         'pages'          => null,
+        'rowActions'     => null,
         'widgets'        => null,
         'widgetRoot'     => '',
     ];
@@ -124,6 +127,9 @@ final class AdminManager
     /** What a project registers its own admin pages in, or `null` when it registers none. */
     private ?\Closure $pages;
 
+    /** What a project registers its own record actions in, or `null` when it registers none. */
+    private ?\Closure $rowActions;
+
     /** What a project registers its own field widgets in, or `null` when it registers none. */
     private ?\Closure $widgets;
 
@@ -157,11 +163,13 @@ final class AdminManager
         $this->thumbnailAliases = self::validateThumbnailAliases($options['thumbnailAliases']);
         $this->uploadAccept     = self::validateUploadAccept($options['uploadAccept']);
         $this->pages            = self::validatePages($options['pages']);
+        $this->rowActions       = self::validateRowActions($options['rowActions']);
         $this->widgets          = self::validateWidgets($options['widgets']);
         $this->widgetRoot       = self::validateWidgetRoot($options['widgetRoot']);
 
         $this->registerServices();
         $this->registerPages();
+        $this->registerRowActions();
         $this->mountRoutes();
         $this->registerAuthBridge();
         $this->registerLoginRedirect();
@@ -199,6 +207,27 @@ final class AdminManager
         $registry->seal();
 
         $this->app[PageRegistry::CONTAINER_KEY] = $registry;
+    }
+
+    /**
+     * Builds the project's row-action registry — eagerly, for the reason `registerPages()` gives.
+     *
+     * The same narrowing of the filesystem promise applies and is not restated here: nothing
+     * scans a directory or reads schema, database or request, and only the classes the project
+     * named by hand are autoloaded (ADR 0028 §2). A row-action class therefore has to be free of
+     * side effects at load time, exactly as a page class is.
+     */
+    private function registerRowActions(): void
+    {
+        $registry = new RowActionRegistry();
+
+        if ($this->rowActions !== null) {
+            ($this->rowActions)($registry);
+        }
+
+        $registry->seal();
+
+        $this->app[RowActionRegistry::CONTAINER_KEY] = $registry;
     }
 
     /**
@@ -667,6 +696,36 @@ final class AdminManager
                 }
             }
         }
+
+        /*
+         * THE RECORD ACTIONS SHARE ONE MOUNT — stage 3b, `<prefix>/rowaction/{entity}/{action}`.
+         *
+         * THE SHAPE IS THE ONE `/bulk` AND `/form` USE, two placeholders included: the core
+         * matches them and hands them to the action method as arguments. That placeholders are
+         * refused for project *pages* is not a contradiction — the page dispatcher resolves an
+         * address by looking it up and a pattern cannot be looked up, while this is a mount of
+         * the package with the core's own matcher behind it (ADR 0029 §3).
+         *
+         * IT IS MOUNTED ONLY WHEN SOMETHING IS REGISTERED, so a project that declares no action
+         * gets no new route at all. The segment stays reserved in `PageRegistry` regardless,
+         * because a page that claimed it while the mount was absent would break on the day the
+         * first action arrives.
+         */
+        if (!$this->app[RowActionRegistry::CONTAINER_KEY]->isEmpty()) {
+            /*
+             * THE SEGMENT IS SPELT OUT HERE AND NOT TAKEN FROM `RowActionRegistry::SEGMENT`,
+             * although the constant exists and everything else uses it. `harness-projekt-seite-
+             * pruefen.php` finds the admin's mounts by reading this file and matching the literal
+             * `->mount($this->prefix.'/<segment>'`, and it does that to hold one invariant: every
+             * mount of the package has a reserved segment, because a second mount on one path
+             * replaces the first in silence. Written through the constant, this mount would be
+             * invisible to exactly the check that exists to catch it. The constant and this
+             * literal are asserted to agree in the same gate.
+             */
+            $this->app['routeManager']
+                ->mount($this->prefix.'/rowaction', RowActionController::class)
+                ->match('{entity}/{action}', true, 'rowActionAction');
+        }
     }
 
     /**
@@ -956,6 +1015,26 @@ final class AdminManager
 
         if (!is_callable($value)) {
             throw new \InvalidArgumentException('The option "pages" must be a callable that takes the PageRegistry, for example static function (PageRegistry $registry) { $registry->register(\Custom\Admin\NewsletterPage::class); }. Leave it out to register no pages of your own.');
+        }
+
+        return \Closure::fromCallable($value);
+    }
+
+    /**
+     * The `rowActions` option: the callback a project registers its record actions in, or nothing.
+     *
+     * ONLY THE SHAPE IS CHECKED HERE, as with `pages`. What the callback does is checked by
+     * `RowActionRegistry` while it runs — still inside this constructor, so a bad action is just
+     * as loud, only with a message about the action instead of about the option.
+     */
+    private static function validateRowActions($value): ?\Closure
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if (!is_callable($value)) {
+            throw new \InvalidArgumentException('The option "rowActions" must be a callable that takes the RowActionRegistry, for example static function (RowActionRegistry $registry) { $registry->register(\Custom\Admin\WordExportAction::class); }. Leave it out to register no record actions of your own.');
         }
 
         return \Closure::fromCallable($value);

@@ -44,11 +44,15 @@ final class PageRegistry
     /**
      * First segments a page may not take, because the admin already mounts them.
      *
-     * Eight of them are mounts of their own (`AdminManager::mountRoutes()`), `login` and `logout`
+     * Nine of them are mounts of their own (`AdminManager::mountRoutes()`), `login` and `logout`
      * are routes of the prefix mount. A page on one of these would not merely be shadowed: for
-     * the eight, `RouteManager` would replace the admin's own provider with the page's, and the
+     * the nine, `RouteManager` would replace the admin's own provider with the page's, and the
      * list, the form or the asset route would stop existing. This list is the reason that cannot
      * happen by accident.
+     *
+     * `rowaction` IS MOUNTED ONLY WHEN A PROJECT REGISTERED A RECORD ACTION, and it is reserved
+     * all the same. A page that took the segment while no action existed would work — and would
+     * break on the day the project adds its first one, which is the worst moment to find out.
      *
      * @var list<string>
      */
@@ -58,6 +62,7 @@ final class PageRegistry
         'options',
         'filepicker',
         'bulk',
+        'rowaction',
         'files',
         'tree',
         '_asset',
