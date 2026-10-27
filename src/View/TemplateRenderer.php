@@ -51,13 +51,28 @@ final class TemplateRenderer
      */
     private const CACHE_NAMESPACE = 'contentfly-admin-templates';
 
+    /**
+     * The Twig namespace a project's own widget fragments live under.
+     *
+     * A NAMESPACE AND NOT A SECOND SEARCH PATH, because two paths under one name would be a
+     * precedence rule — and ADR 0027 §3 decided against having one at all. `@project/x.html.twig`
+     * and `widget/x.html.twig` cannot refer to the same file, so a project fragment is reachable
+     * without anything of the package becoming unreachable. `FormController` builds the name;
+     * the templates stay free of the rule.
+     */
+    public const PROJECT_NAMESPACE = 'project';
+
     private string $templateDir;
+
+    /** The project's widget directory (`widgetRoot`), or `null` when it has none. */
+    private ?string $widgetDir;
 
     private ?Environment $twig = null;
 
-    public function __construct(?string $templateDir = null)
+    public function __construct(?string $templateDir = null, ?string $widgetDir = null)
     {
         $this->templateDir = $templateDir ?? dirname(__DIR__, 2).'/templates';
+        $this->widgetDir   = $widgetDir;
     }
 
     /**
@@ -82,8 +97,20 @@ final class TemplateRenderer
     private function environment(): Environment
     {
         if ($this->twig === null) {
+            $loader = new FilesystemLoader($this->templateDir);
+
+            /*
+             * THE DIRECTORY IS NOT CHECKED, IT IS HANDED TO TWIG. A missing one throws on the
+             * first render naming the template it looked for, which is the better message than
+             * anything this class could produce — and checking it here would be the filesystem
+             * access the class promises not to make while `custom/app.php` is read.
+             */
+            if ($this->widgetDir !== null) {
+                $loader->addPath($this->widgetDir, self::PROJECT_NAMESPACE);
+            }
+
             $this->twig = new Environment(
-                new FilesystemLoader($this->templateDir),
+                $loader,
                 array(
                     'cache'            => $this->cacheDir(),
                     'auto_reload'      => true,

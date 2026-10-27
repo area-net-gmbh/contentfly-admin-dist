@@ -15,6 +15,7 @@ use Areanet\ContentflyAdmin\View\MenuBuilder;
 use Areanet\ContentflyAdmin\View\RelationOptions;
 use Areanet\ContentflyAdmin\View\RichText;
 use Areanet\ContentflyAdmin\View\TemplateRenderer;
+use Areanet\ContentflyAdmin\View\WidgetRegistry;
 use Areanet\ContentflyAdmin\View\WidgetResolver;
 use Areanet\PIM\Classes\Api;
 use Areanet\PIM\Classes\Exceptions\ContentflyException;
@@ -940,6 +941,7 @@ final class FormController
                 'property'  => $property,
                 'label'     => $field['label'],
                 'widget'    => $fragment,
+                'templates' => self::templates($fragment),
                 /*
                  * THE CORE ALIAS GOES ALONG because three of them share one widget key:
                  * `number` has to know whether it is looking at an `integer` or at a `decimal`,
@@ -993,6 +995,20 @@ final class FormController
 
         $key = (string) ($widget['widget'] ?? '');
 
+        /*
+         * A PROJECT KEY PASSES, AND IT HAS TO PASS HERE rather than by being added to the
+         * allowlist below: the package cannot know the names, so the prefix is the only thing it
+         * can recognise (ADR 0027 §3). Until 005-002 this branch did not exist, which is where
+         * the whole seam ended in practice — the registration worked, the resolver answered with
+         * the project's key, and the form still rendered a plain value, because every unknown key
+         * fell through to `readonly` one line down. The checks above stay in front of this on
+         * purpose: `readonly` from the attribute or from a computed value is write protection,
+         * and a registered widget does not argue with it.
+         */
+        if (str_starts_with($key, WidgetRegistry::PROJECT_PREFIX)) {
+            return $key;
+        }
+
         if (!isset(self::FRAGMENTS[$key])) {
             return 'readonly';
         }
@@ -1003,6 +1019,31 @@ final class FormController
         }
 
         return $key;
+    }
+
+    /**
+     * The template candidates for one fragment, most specific first.
+     *
+     * TWO NAMESPACES, AND THE DIFFERENCE IS THE FALLBACK. A package key keeps the second
+     * candidate `widget/readonly.html.twig`, because a package key without a fragment is a
+     * DECIDED outcome and not an accident — `permissionmatrix` is exactly that and renders as a
+     * plain value (ADR 0016 §2). A project key gets no second candidate: a registered widget
+     * whose fragment is missing is a mistake in the project, and Twig naming the template it
+     * looked for is the message. The same trade as `strict_variables` in `TemplateRenderer` —
+     * the loud failure is the cheaper one, and the silent one looks like a working page.
+     *
+     * Deciding it here keeps `form.html.twig` free of the naming rule, the same split the
+     * fragments and the controller map already follow.
+     *
+     * @return list<string>
+     */
+    private static function templates(string $fragment): array
+    {
+        if (str_starts_with($fragment, WidgetRegistry::PROJECT_PREFIX)) {
+            return array('@'.TemplateRenderer::PROJECT_NAMESPACE.'/'.$fragment.'.html.twig');
+        }
+
+        return array('widget/'.$fragment.'.html.twig', 'widget/readonly.html.twig');
     }
 
     /**
@@ -1017,6 +1058,17 @@ final class FormController
      */
     private static function writableFragment(string $fragment): bool
     {
+        /*
+         * A PROJECT FRAGMENT IS WRITTEN. It stands where the package's input element stood, for a
+         * field the resolver called editable — answering `false` here would render the control,
+         * take the editor's input and drop it on save. That is the shape of the data loss found
+         * in the `search` fragment (task 000-000-0002), and it is worth not building a second
+         * time.
+         */
+        if (str_starts_with($fragment, WidgetRegistry::PROJECT_PREFIX)) {
+            return true;
+        }
+
         return self::FRAGMENTS[$fragment] ?? false;
     }
 

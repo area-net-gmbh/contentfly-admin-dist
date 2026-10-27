@@ -76,6 +76,7 @@ final class AdminManager
         'thumbnailAliases' => [],
         'uploadAccept'   => '',
         'widgets'        => null,
+        'widgetRoot'     => '',
     ];
 
     /**
@@ -120,6 +121,9 @@ final class AdminManager
     /** What a project registers its own field widgets in, or `null` when it registers none. */
     private ?\Closure $widgets;
 
+    /** Directory holding the project's own widget fragments; empty means it has none. */
+    private string $widgetRoot;
+
     /**
      * @param array<string,mixed> $options See self::DEFAULTS for the accepted keys.
      *
@@ -147,6 +151,7 @@ final class AdminManager
         $this->thumbnailAliases = self::validateThumbnailAliases($options['thumbnailAliases']);
         $this->uploadAccept     = self::validateUploadAccept($options['uploadAccept']);
         $this->widgets          = self::validateWidgets($options['widgets']);
+        $this->widgetRoot       = self::validateWidgetRoot($options['widgetRoot']);
 
         $this->registerServices();
         $this->mountRoutes();
@@ -187,8 +192,10 @@ final class AdminManager
             return new AdminAuthenticator($app, $prefix);
         };
 
-        $this->app[TemplateRenderer::CONTAINER_KEY] = static function (): TemplateRenderer {
-            return new TemplateRenderer();
+        $widgetRoot = $this->widgetRoot;
+
+        $this->app[TemplateRenderer::CONTAINER_KEY] = static function () use ($widgetRoot): TemplateRenderer {
+            return new TemplateRenderer(null, $widgetRoot !== '' ? $widgetRoot : null);
         };
 
         $this->app[LoginScreen::CONTAINER_KEY] = static function ($app): LoginScreen {
@@ -780,6 +787,42 @@ final class AdminManager
      *
      * @return list<string>
      */
+    /**
+     * The `widgetRoot` option: the directory a project keeps its own widget fragments in.
+     *
+     * ONLY THE SHAPE IS CHECKED, NOT WHETHER THE DIRECTORY EXISTS. The option is read while
+     * `custom/app.php` runs — in every console run and in `appcms:install` too — and this class
+     * touches no filesystem there. A directory that is missing surfaces on the first render, from
+     * Twig, naming the template it looked for; that is a better message than one invented here,
+     * and it arrives at the moment someone is actually looking at a form.
+     *
+     * An absolute path is required because a relative one would be read against the working
+     * directory, which differs between the web entry point and a console run — the one kind of
+     * bug that only shows up in half the ways a project is used.
+     *
+     * @param mixed $value
+     *
+     * @throws \InvalidArgumentException when the option is neither empty nor an absolute path
+     */
+    private static function validateWidgetRoot($value): string
+    {
+        if (!is_string($value)) {
+            throw new \InvalidArgumentException('The option "widgetRoot" must be an absolute path to the directory holding your widget fragments, for example __DIR__ . "/widgets". Leave it out if you ship none.');
+        }
+
+        $root = rtrim(trim($value), '/');
+
+        if ($root === '') {
+            return '';
+        }
+
+        if (strpos($root, '/') !== 0) {
+            throw new \InvalidArgumentException(sprintf('The option "widgetRoot" needs an absolute path; "%s" is relative and would be read against the working directory, which is not the same for a request and for a console run. Use __DIR__ . "/widgets".', $root));
+        }
+
+        return $root;
+    }
+
     /**
      * The `widgets` option: what a project registers its own field widgets in.
      *

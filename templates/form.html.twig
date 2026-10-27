@@ -9,8 +9,9 @@
 
     `widget` IS THE SWITCH, and it is ADR 0013's widget key — there is no second vocabulary of
     HTML controls in between any more (002-007-0002 removed it). The `field()` macro has no
-    per-key branch at all: it opens the wrapper, includes `widget/<key>.html.twig` and prints the
-    finding. A key without a fragment falls back to `widget/readonly.html.twig`, which is the
+    per-key branch at all: it opens the wrapper, includes the candidates the controller worked out
+    (`FormController::templates()`) and prints the
+    finding. A package key without a fragment falls back to `widget/readonly.html.twig`, which is the
     honest answer for a relation before 002-007-0004, a file before story 003-004, or a 22nd type
     from a plugin — the value is shown and not offered, so nothing can be saved that this package
     cannot form. `FormController::writable()` holds the same line on the save path, so the
@@ -53,7 +54,7 @@
 {% macro field(field) %}
 {% set described = field.error ? 'error-' ~ field.property : '' %}
         <div class="admin-form__field{% if field.error %} admin-form__field--invalid{% endif %}">
-{% include ['widget/' ~ field.widget ~ '.html.twig', 'widget/readonly.html.twig'] with {'field': field, 'described': described} only %}
+{% include field.templates with {'field': field, 'described': described} only %}
 {% if field.error %}
             <p class="admin-form__field-error" id="{{ described }}">{{ field.error }}</p>
 {% endif %}
