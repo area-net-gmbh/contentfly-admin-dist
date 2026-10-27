@@ -250,11 +250,17 @@ final class AdminManager
              * `EntityView` ANSWERS WHETHER AN ENTITY IS A TREE (story 004-001). The factories
              * are lazy, so naming it here constructs objects and reads no schema — the menu
              * still touches nothing until `build()` is called.
+             *
+             * `PageRegistry` IS ALREADY BUILT at this point and is a plain value, not a factory
+             * (`registerPages()`): it had to be filled before the routes were mounted. Reading
+             * it here therefore costs nothing either — the list exists, the menu only asks for
+             * it when it is built.
              */
             return new MenuBuilder(
                 $app[self::CONTAINER_KEY],
                 $app[PermissionView::CONTAINER_KEY],
-                $app[EntityView::CONTAINER_KEY]
+                $app[EntityView::CONTAINER_KEY],
+                $app[PageRegistry::CONTAINER_KEY]
             );
         };
 

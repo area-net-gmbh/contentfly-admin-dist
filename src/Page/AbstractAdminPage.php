@@ -8,6 +8,7 @@ use Areanet\ContentflyAdmin\AdminManager;
 use Areanet\ContentflyAdmin\Asset\Importmap;
 use Areanet\ContentflyAdmin\Attribute\AdminAction;
 use Areanet\ContentflyAdmin\Attribute\AdminPage;
+use Areanet\ContentflyAdmin\Auth\PermissionView;
 use Areanet\ContentflyAdmin\Controller\GuardsCoreVersion;
 use Areanet\ContentflyAdmin\Controller\GuardsPermissions;
 use Areanet\ContentflyAdmin\Schema\Envelope;
@@ -108,7 +109,7 @@ abstract class AbstractAdminPage
         if ($declared !== null) {
             $permission = PagePermission::parse($declared);
 
-            if (!$permission->isGranted($this->app)) {
+            if (!$permission->isGranted($this->app[PermissionView::CONTAINER_KEY])) {
                 return $this->accessDeniedPage($permission->entity);
             }
         }

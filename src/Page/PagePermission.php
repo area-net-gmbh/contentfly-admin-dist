@@ -74,14 +74,14 @@ final class PagePermission
     }
 
     /**
-     * Does the editor of this request hold the right?
+     * Does the editor hold the right?
      *
-     * @param \Areanet\PIM\Classes\Kernel\ApplicationInterface $app
+     * IT TAKES THE `PermissionView`, NOT THE CONTAINER, because both callers already hold one —
+     * the page through its app, the menu as a constructor dependency — and a value object that
+     * reaches into a container cannot be asked a question without one.
      */
-    public function isGranted($app): bool
+    public function isGranted(PermissionView $permissions): bool
     {
-        $permissions = $app[PermissionView::CONTAINER_KEY];
-
         return match ($this->action) {
             self::WRITE  => $permissions->mayWrite($this->entity),
             self::DELETE => $permissions->mayDelete($this->entity),

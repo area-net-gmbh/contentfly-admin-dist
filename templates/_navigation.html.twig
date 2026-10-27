@@ -15,10 +15,23 @@
     `/<prefix>/list/<Entity>` and not directly under the prefix (ADR 0012), so `MenuBuilder`
     was adjusted with it. The mapping still lives there and not here, which is what kept that
     to a one-line change.
+
+    THE PROJECT'S OWN PAGES SHARE THIS LOOP since story 005-003 (stage 3a). They arrive as
+    further items, after the entities, and the only difference is `groupHeading`: the builder
+    sets it on the first entry of each group, so this template renders a heading without having
+    to remember anything between two passes of the loop. Grouping stays a rule of `MenuBuilder`,
+    for the same reason the URL mapping does.
+
+    THE HEADING IS A `<li>` AND NOT A NESTED `<ul>`, because a nested list would make every
+    grouped entry one level deeper for a screen reader while the group is a caption, not a
+    sub-menu. It is marked `role="presentation"` so it is not announced as a navigable item.
 #}
 <nav class="admin-nav" aria-label="Hauptmenü">
     <ul class="admin-nav__list">
 {% for item in menu %}
+{% if item.groupHeading %}
+        <li class="admin-nav__group" role="presentation">{{ item.groupHeading }}</li>
+{% endif %}
         <li class="admin-nav__item"><a class="admin-nav__link" href="{{ item.url }}">{{ item.label }}</a></li>
 {% endfor %}
     </ul>

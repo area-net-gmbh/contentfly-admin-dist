@@ -7,6 +7,8 @@ namespace Areanet\ContentflyAdmin\View;
 use Areanet\ContentflyAdmin\AdminManager;
 use Areanet\ContentflyAdmin\Auth\PermissionView;
 use Areanet\ContentflyAdmin\Controller\FileController;
+use Areanet\ContentflyAdmin\Page\PagePermission;
+use Areanet\ContentflyAdmin\Page\PageRegistry;
 
 /**
  * The admin's main menu, built from the schema.
@@ -91,14 +93,18 @@ final class MenuBuilder
 
     private EntityView $entityView;
 
+    private PageRegistry $pages;
+
     public function __construct(
         AdminManager $manager,
         PermissionView $permissions,
-        EntityView $entityView
+        EntityView $entityView,
+        PageRegistry $pages
     ) {
         $this->manager     = $manager;
         $this->permissions = $permissions;
         $this->entityView  = $entityView;
+        $this->pages       = $pages;
     }
 
     /**
@@ -109,7 +115,20 @@ final class MenuBuilder
      * not an error: `layout.html.twig` renders no navigation at all for it rather than an empty
      * bar.
      *
-     * @return list<array{entity: string, label: string, url: string}>
+     * THE PROJECT PAGES COME AFTER THE ENTITIES, and the entities keep the order the whitelist
+     * gives them — a page cannot push a list entry anywhere. Pages without a `group` join the
+     * plain tail; grouped ones follow, each group in the order the project registered it, and
+     * the first entry of a group carries the heading.
+     *
+     * THE HEADING IS DECIDED HERE AND NOT IN THE TEMPLATE. A template tracking "has the group
+     * changed?" across loop iterations would be the rule split in two, which is exactly what
+     * `_navigation.html.twig` says it avoids for the URL mapping.
+     *
+     * IT STAYS ONE FLAT LIST, deliberately. `layout.html.twig` renders no navigation at all when
+     * `menu` is empty, and that is the right answer for an editor who may read nothing. A
+     * structure of two keys would always be non-empty and would hand that editor an empty bar.
+     *
+     * @return list<array{entity: string|null, label: string, url: string, groupHeading: string|null}>
      */
     public function build(): array
     {
@@ -143,9 +162,10 @@ final class MenuBuilder
              */
             if ($entity === FileController::ENTITY_FILE) {
                 $items[] = array(
-                    'entity' => $entity,
-                    'label'  => 'Dateien',
-                    'url'    => $this->manager->getPrefix().'/files/',
+                    'entity'       => $entity,
+                    'label'        => 'Dateien',
+                    'url'          => $this->manager->getPrefix().'/files/',
+                    'groupHeading' => null,
                 );
 
                 continue;
@@ -159,10 +179,68 @@ final class MenuBuilder
             $area = $this->entityView->isTree($entity) ? '/tree/' : '/list/';
 
             $items[] = array(
-                'entity' => $entity,
-                'label'  => $entity,
-                'url'    => $this->manager->getPrefix().$area.self::entityToUrl($entity),
+                'entity'       => $entity,
+                'label'        => $entity,
+                'url'          => $this->manager->getPrefix().$area.self::entityToUrl($entity),
+                'groupHeading' => null,
             );
+        }
+
+        return array_merge($items, $this->pageItems());
+    }
+
+    /**
+     * The menu entries of the project's own pages, grouped.
+     *
+     * A PAGE WITH A `permission` APPEARS ONLY WHERE THE EDITOR HOLDS IT, and the answer comes
+     * from the same `PagePermission` the page itself asks before it renders (ADR 0028 §3). That
+     * is the point of it being one class: a menu offering a page that refuses itself is a dead
+     * link, and a page reachable although the menu hides it is the inverse and worse.
+     *
+     * A PAGE WITHOUT A `permission` IS LISTED FOR EVERY SIGNED-IN EDITOR, which is what the
+     * attribute promises. Signed in, not everyone — the mount carries `isSecure`.
+     *
+     * THE ADDRESS CARRIES THE TRAILING SLASH, for the reason the file entry above records: a
+     * mount's own route has the empty name, so the page answers at `<prefix><route>/`, and the
+     * slashless form is a method-not-allowed rather than a redirect.
+     *
+     * @return list<array{entity: string|null, label: string, url: string, groupHeading: string|null}>
+     */
+    private function pageItems(): array
+    {
+        $plain   = array();
+        $grouped = array();
+
+        foreach ($this->pages->all() as $page) {
+            if ($page->permission !== null
+                && !PagePermission::parse($page->permission)->isGranted($this->permissions)) {
+                continue;
+            }
+
+            $item = array(
+                'entity'       => null,
+                'label'        => $page->label,
+                'url'          => $this->manager->getPrefix().$page->route.'/',
+                'groupHeading' => null,
+            );
+
+            if ($page->group === null) {
+                $plain[] = $item;
+
+                continue;
+            }
+
+            $grouped[$page->group][] = $item;
+        }
+
+        $items = $plain;
+
+        foreach ($grouped as $group => $entries) {
+            $entries[0]['groupHeading'] = (string) $group;
+
+            foreach ($entries as $entry) {
+                $items[] = $entry;
+            }
         }
 
         return $items;

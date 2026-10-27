@@ -95,6 +95,22 @@ li {
     border-bottom: 0;
 }
 
+/*
+ * The caption of a group of project pages (stage 3a). It is a label, not a link: dimmed and
+ * smaller, so the eye reads it as the heading of what follows rather than as another entry.
+ * `margin-left` is what separates one group from the entries before it on a flex row that
+ * wraps, since a vertical gap would be lost whenever the menu fits on one line.
+ */
+.admin-nav__group {
+    padding: 0;
+    border-bottom: 0;
+    margin-left: 0.5rem;
+    color: var(--admin-muted);
+    font-size: 0.85em;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
 .admin-nav__link,
 .admin-nav__logout {
     color: var(--admin-accent);
