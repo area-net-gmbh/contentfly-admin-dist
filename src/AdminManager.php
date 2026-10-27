@@ -75,6 +75,7 @@ final class AdminManager
         'thumbnailAlias' => 'pim_list',
         'thumbnailAliases' => [],
         'uploadAccept'   => '',
+        'widgets'        => null,
     ];
 
     /**
@@ -116,6 +117,9 @@ final class AdminManager
     /** `accept` value the upload offers the browser; empty means no pre-check at all. */
     private string $uploadAccept;
 
+    /** What a project registers its own field widgets in, or `null` when it registers none. */
+    private ?\Closure $widgets;
+
     /**
      * @param array<string,mixed> $options See self::DEFAULTS for the accepted keys.
      *
@@ -142,6 +146,7 @@ final class AdminManager
         $this->thumbnailAlias   = self::validateThumbnailAlias($options['thumbnailAlias']);
         $this->thumbnailAliases = self::validateThumbnailAliases($options['thumbnailAliases']);
         $this->uploadAccept     = self::validateUploadAccept($options['uploadAccept']);
+        $this->widgets          = self::validateWidgets($options['widgets']);
 
         $this->registerServices();
         $this->mountRoutes();
@@ -222,8 +227,26 @@ final class AdminManager
             return new RelationOptions($app);
         };
 
-        $this->app[WidgetRegistry::CONTAINER_KEY] = static function (): WidgetRegistry {
-            return new WidgetRegistry();
+        $widgets = $this->widgets;
+
+        $this->app[WidgetRegistry::CONTAINER_KEY] = static function () use ($widgets): WidgetRegistry {
+            /*
+             * THE PROJECT'S CALLBACK RUNS HERE, NOT IN THE CONSTRUCTOR, and that is what keeps the
+             * promise of this method intact: nothing is read while `custom/app.php` runs, so a
+             * console run and an install still touch no widget code at all. The window is kept all
+             * the same, because the callback was handed over inside that window and can therefore
+             * not be missed; what follows it is the seal, which turns a later registration from a
+             * coin toss into a message (ADR 0027).
+             */
+            $registry = new WidgetRegistry();
+
+            if ($widgets !== null) {
+                $widgets($registry);
+            }
+
+            $registry->seal();
+
+            return $registry;
         };
 
         $this->app[WidgetResolver::CONTAINER_KEY] = static function ($app): WidgetResolver {
@@ -757,6 +780,31 @@ final class AdminManager
      *
      * @return list<string>
      */
+    /**
+     * The `widgets` option: what a project registers its own field widgets in.
+     *
+     * A callback rather than a list, because a list would have to spell the two override kinds of
+     * ADR 0013 as data and would then need its own grammar, its own validation and its own error
+     * messages — while `WidgetRegistry` already is that grammar. The callback also puts the
+     * registration inside the one window where it is guaranteed to be in time (ADR 0027).
+     *
+     * @param mixed $value
+     *
+     * @throws \InvalidArgumentException when the option is neither absent nor callable
+     */
+    private static function validateWidgets($value): ?\Closure
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if (!is_callable($value)) {
+            throw new \InvalidArgumentException('The option "widgets" must be a callable that takes the WidgetRegistry, for example static function (WidgetRegistry $registry) { $registry->registerType(\'string\', \'custom-farbwaehler\'); }. Leave it out to register no widgets of your own.');
+        }
+
+        return \Closure::fromCallable($value);
+    }
+
     private static function validateThumbnailAliases($aliases): array
     {
         if (!is_array($aliases)) {

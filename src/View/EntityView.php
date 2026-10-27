@@ -472,8 +472,16 @@ final class EntityView
              * text. The guard on the alias is not politeness — a `string` or a `json` column has
              * no room for markup, and a rich text control over one would produce HTML that the
              * field cannot hold.
+             *
+             * A REGISTERED PROJECT WIDGET BEATS IT (ADR 0027 §4). Both statements come from the
+             * project, so one of them has to give way, and `rte: true` is the shorthand while a
+             * registration names the element outright. Without this guard the registry could not
+             * reach a single `textarea` field carrying the attribute — which is the long-text
+             * field with a special editor, one of the most common own widgets there is.
              */
-            if (($shaping['rte'] ?? null) === true && ($widget['type'] ?? null) === RichText::TYPE) {
+            if (($shaping['rte'] ?? null) === true
+                && ($widget['type'] ?? null) === RichText::TYPE
+                && ($widget['overridden'] ?? false) !== true) {
                 $widget['widget'] = RichText::WIDGET;
             }
 

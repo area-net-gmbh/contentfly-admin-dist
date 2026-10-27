@@ -118,7 +118,10 @@ final class WidgetResolver
      * properties has it already, and a second reader of the schema is how a form and a list end
      * up disagreeing about a field.
      *
-     * Every definition carries `widget`, `type`, `required`, `readonly` and `default`. The keys
+     * Every definition carries `widget`, `type`, `required`, `readonly`, `default` and
+     * `overridden`. The last one says whether the element came from the registry rather than from
+     * the mapping, and it exists because `EntityView` has to know: the `rte` attribute changes the
+     * element too, and a registered project widget beats it (ADR 0027 §4). The keys
      * that only some widgets need are present only where they apply: `maxlength`, `options`,
      * `group`, `target`, `sortable` and `through`. A template therefore never has to tell
      * "absent" from "empty".
@@ -127,7 +130,7 @@ final class WidgetResolver
      * @param string                    $property The property name
      * @param array<string,mixed>|mixed $meta     The field's schema entry
      *
-     * @return array{widget: string, type: string|null, required: bool, readonly: bool, default: mixed, maxlength?: int, options?: array<int,mixed>, group?: string, target?: string, sortable?: bool, through?: string}
+     * @return array{widget: string, type: string|null, required: bool, readonly: bool, default: mixed, overridden: bool, maxlength?: int, options?: array<int,mixed>, group?: string, target?: string, sortable?: bool, through?: string}
      */
     public function resolve(string $entity, string $property, $meta): array
     {
@@ -149,11 +152,12 @@ final class WidgetResolver
         $widget = self::WIDGETS[$type];
 
         $definition = array(
-            'widget'   => $override ?? $widget,
-            'type'     => $type,
-            'required' => ($meta['nullable'] ?? null) === false,
-            'readonly' => $type === self::COMPUTED_TYPE,
-            'default'  => $meta['default'] ?? null,
+            'widget'     => $override ?? $widget,
+            'type'       => $type,
+            'required'   => ($meta['nullable'] ?? null) === false,
+            'readonly'   => $type === self::COMPUTED_TYPE,
+            'default'    => $meta['default'] ?? null,
+            'overridden' => $override !== null,
         );
 
         $length = $meta['length'] ?? null;
@@ -256,16 +260,17 @@ final class WidgetResolver
      * case an override cannot lift is `virtualjoin` above, where the core computes the value and
      * no widget changes that.
      *
-     * @return array{widget: string, type: string|null, required: bool, readonly: bool, default: mixed}
+     * @return array{widget: string, type: string|null, required: bool, readonly: bool, default: mixed, overridden: bool}
      */
     private static function fallback(?string $type, ?string $override): array
     {
         return array(
-            'widget'   => $override ?? self::FALLBACK_WIDGET,
-            'type'     => $type,
-            'required' => false,
-            'readonly' => $override === null,
-            'default'  => null,
+            'widget'     => $override ?? self::FALLBACK_WIDGET,
+            'type'       => $type,
+            'required'   => false,
+            'readonly'   => $override === null,
+            'default'    => null,
+            'overridden' => $override !== null,
         );
     }
 }
