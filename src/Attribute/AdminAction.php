@@ -34,8 +34,8 @@ final class AdminAction
     /**
      * @param string $route  The full address below the admin's prefix, beginning with the page's
      *                       own route — `/newsletter/reset` for a page routed at `/newsletter`.
-     *                       Same rules as `AdminPage::$route`: leading slash, no dot, a
-     *                       placeholder matches one segment.
+     *                       Same rules as `AdminPage::$route`: leading slash, no dot and no
+     *                       placeholder, and it has to begin with the page's own route.
      * @param string $method The HTTP method this route answers. `'GET'`, `'POST'` or `'ANY'`;
      *                       `'ANY'` is the core's `match()` and the way to let one method serve
      *                       both, which is what the core's own routing requires — two routes of

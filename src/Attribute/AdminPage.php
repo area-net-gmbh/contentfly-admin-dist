@@ -36,10 +36,15 @@ final class AdminPage
     /**
      * @param string      $route      The page's address below the admin's prefix, with a leading
      *                                slash — `/newsletter` becomes `/<prefix>/newsletter`. One or
-     *                                more segments; a placeholder matches a single segment
-     *                                (ADR 0007). No dot: the core builds its controller key from
-     *                                the path, and an extra dot shifts the parts of its event
-     *                                names (`AdminManager::validatePrefix()`).
+     *                                more segments of letters, digits, hyphens and underscores.
+     *                                No placeholders: the dispatcher looks an address up rather
+     *                                than matching a pattern, so parameters travel in the query
+     *                                string (ADR 0028 §4). No dot either — the core builds its
+     *                                controller key from the path, and an extra dot shifts the
+     *                                parts of its event names
+     *                                (`AdminManager::validatePrefix()`). The first segment may
+     *                                not be one the admin uses itself; `Page\PageRegistry`
+     *                                lists them.
      * @param string      $label      The menu entry's text, shown to editors as written.
      * @param string|null $group      Menu group this page is listed under. Null lists it beside
      *                                the entities rather than inventing a group of one.

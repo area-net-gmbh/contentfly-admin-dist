@@ -16,7 +16,9 @@ use Areanet\ContentflyAdmin\Controller\FilePickerController;
 use Areanet\ContentflyAdmin\Controller\FormController;
 use Areanet\ContentflyAdmin\Controller\ListController;
 use Areanet\ContentflyAdmin\Controller\OptionsController;
+use Areanet\ContentflyAdmin\Controller\PageController;
 use Areanet\ContentflyAdmin\Controller\TreeController;
+use Areanet\ContentflyAdmin\Page\PageRegistry;
 use Areanet\ContentflyAdmin\Schema\SchemaClient;
 use Areanet\ContentflyAdmin\Schema\ShapingListener;
 use Areanet\ContentflyAdmin\Schema\VersionGuard;
@@ -75,6 +77,7 @@ final class AdminManager
         'thumbnailAlias' => 'pim_list',
         'thumbnailAliases' => [],
         'uploadAccept'   => '',
+        'pages'          => null,
         'widgets'        => null,
         'widgetRoot'     => '',
     ];
@@ -118,6 +121,9 @@ final class AdminManager
     /** `accept` value the upload offers the browser; empty means no pre-check at all. */
     private string $uploadAccept;
 
+    /** What a project registers its own admin pages in, or `null` when it registers none. */
+    private ?\Closure $pages;
+
     /** What a project registers its own field widgets in, or `null` when it registers none. */
     private ?\Closure $widgets;
 
@@ -150,15 +156,49 @@ final class AdminManager
         $this->thumbnailAlias   = self::validateThumbnailAlias($options['thumbnailAlias']);
         $this->thumbnailAliases = self::validateThumbnailAliases($options['thumbnailAliases']);
         $this->uploadAccept     = self::validateUploadAccept($options['uploadAccept']);
+        $this->pages            = self::validatePages($options['pages']);
         $this->widgets          = self::validateWidgets($options['widgets']);
         $this->widgetRoot       = self::validateWidgetRoot($options['widgetRoot']);
 
         $this->registerServices();
+        $this->registerPages();
         $this->mountRoutes();
         $this->registerAuthBridge();
         $this->registerLoginRedirect();
         $this->registerCommands();
         $this->registerSchemaListener();
+    }
+
+    /**
+     * Builds the project's page registry — eagerly, which is the one place this class reads
+     * something while `custom/app.php` runs.
+     *
+     * IT CANNOT BE A LAZY FACTORY LIKE THE WIDGET REGISTRY. A widget is needed when a field
+     * renders, long after the request began; a route that does not exist before `bindRoutes()`
+     * is not a route at all. `mountRoutes()` runs next and needs the list, so the list has to
+     * exist now.
+     *
+     * THE PROMISE IS NARROWED, NOT BROKEN, and ADR 0028 §2 says so in as many words. Nothing
+     * here scans a directory, reads the schema, touches the database or asks for the request —
+     * only the classes the project named by hand are autoloaded, and `Foo::class` is a
+     * compile-time constant that loads nothing by itself. The reflection in `PageRegistry` is
+     * what loads them. That is why a page class has to be free of side effects at load time: it
+     * is loaded in every console run and in `appcms:install` too.
+     *
+     * A PLAIN VALUE IN THE CONTAINER, not a closure, because a closure would be a lazy factory
+     * (`registerServices()`) and the whole point here is that it has already run.
+     */
+    private function registerPages(): void
+    {
+        $registry = new PageRegistry();
+
+        if ($this->pages !== null) {
+            ($this->pages)($registry);
+        }
+
+        $registry->seal();
+
+        $this->app[PageRegistry::CONTAINER_KEY] = $registry;
     }
 
     /**
@@ -575,6 +615,52 @@ final class AdminManager
             ->get('{version}/{file}', false, 'serveAction')
             ->get('{version}/{dir}/{file}', false, 'serveAction')
             ->get('{version}/{dir}/{sub}/{file}', false, 'serveAction');
+
+        /*
+         * THE PROJECT'S PAGES, ONE MOUNT EACH — stage 3a (ADR 0028).
+         *
+         * One mount per page and not one shared mount for all of them, because `RouteManager`
+         * keys its providers by mount path: a second `mount()` on the same path replaces the
+         * first silently. `Page\PageRegistry` has already refused two pages on one address, so
+         * what is left here cannot collide — including with the admin's own mounts above, whose
+         * segments the registry reserves.
+         *
+         * `isSecure = true` for every route of a page, the page route included. A page without a
+         * `permission` is open to every signed-in editor, never to everyone: the flag is what
+         * hangs the core's token check in front of it, and `$this->api` needs the `auth.user`
+         * that only a guarded main request sets.
+         *
+         * THE ROUTE NAME OF THE PAGE ITSELF IS THE EMPTY STRING, which is what puts the page on
+         * the mount path — the same thing the index page does. The address therefore carries a
+         * trailing slash, exactly as `/<prefix>/` does, and `PageController` strips it before it
+         * looks the route up.
+         *
+         * THE HTTP METHOD COMES FROM THE ATTRIBUTE, and `ANY` is the core's `match()`. Two routes
+         * of the same name within one provider do not add up — the second replaces the first — so
+         * a page that needs one address for GET and POST declares `ANY` and branches inside the
+         * method, exactly as `loginAction()` and `formAction()` do.
+         */
+        foreach ($this->app[PageRegistry::CONTAINER_KEY]->all() as $page) {
+            $provider = $this->app['routeManager']
+                ->mount($this->prefix.$page->route, PageController::class);
+
+            $provider->match('', true, 'dispatchAction');
+
+            foreach ($page->actions as $route => $action) {
+                $name = ltrim(substr($route, strlen($page->route)), '/');
+
+                switch ($action['method']) {
+                    case 'GET':
+                        $provider->get($name, true, 'dispatchAction');
+                        break;
+                    case 'POST':
+                        $provider->post($name, true, 'dispatchAction');
+                        break;
+                    default:
+                        $provider->match($name, true, 'dispatchAction');
+                }
+            }
+        }
     }
 
     /**
@@ -847,6 +933,26 @@ final class AdminManager
         }
 
         return $root;
+    }
+
+    /**
+     * The `pages` option: the callback a project registers its admin pages in, or nothing.
+     *
+     * ONLY THE SHAPE IS CHECKED HERE. What the callback does is checked by `PageRegistry` when it
+     * runs — which is still inside this constructor, so a bad page is just as loud, only with a
+     * message about the page instead of about the option.
+     */
+    private static function validatePages($value): ?\Closure
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if (!is_callable($value)) {
+            throw new \InvalidArgumentException('The option "pages" must be a callable that takes the PageRegistry, for example static function (PageRegistry $registry) { $registry->register(\Custom\Admin\NewsletterPage::class); }. Leave it out to register no pages of your own.');
+        }
+
+        return \Closure::fromCallable($value);
     }
 
     /**
