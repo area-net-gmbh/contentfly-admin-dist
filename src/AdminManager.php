@@ -659,6 +659,32 @@ final class AdminManager
     }
 
     /**
+     * The address of one file in the project's widget directory.
+     *
+     * ALWAYS THE ROUTE, NEVER THE STATIC COPY, and that is the one way this differs from
+     * `assetUrl()`. `Command\PublishAssetsCommand` copies the package's `public/` and nothing
+     * else, so a project file does not exist under `assetPath` — pointing there would be a 404
+     * in exactly the setup that is supposed to be the fast one, and it would look like a broken
+     * widget rather than a missing copy. The price is that project widget assets are handed out
+     * by PHP even in production; the version segment still makes them cacheable forever.
+     *
+     * @param string $path path relative to the project's widget directory, e.g.
+     *                     `controllers/custom-farbwaehler_controller.js`
+     */
+    public function projectAssetUrl(string $path): string
+    {
+        return $this->prefix.'/_asset/'.Version::VERSION.'/'.AssetController::PROJECT_DIR.'/'.ltrim($path, '/');
+    }
+
+    /**
+     * The directory holding the project's own widget fragments, or an empty string for none.
+     */
+    public function widgetRoot(): string
+    {
+        return $this->widgetRoot;
+    }
+
+    /**
      * The URL path of the static asset copy, or an empty string when the route serves them.
      */
     public function getAssetPath(): string

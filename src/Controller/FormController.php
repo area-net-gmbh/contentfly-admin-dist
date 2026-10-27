@@ -611,7 +611,7 @@ final class FormController
              * the template keeps the template free of logic, the same split the field controls
              * already follow.
              */
-            'controllers' => self::controllers($tabs, $prepared),
+            'controllers' => self::controllers($tabs, $prepared, $manager),
         ));
 
         $response = new Response($html, $status, array('Content-Type' => 'text/html; charset=UTF-8'));
@@ -634,9 +634,9 @@ final class FormController
      * @param list<array<string,mixed>>                        $tabs
      * @param array<string,array{fragment: string, options: mixed}> $prepared
      *
-     * @return array<string,string>
+     * @return array<string,string> Stimulus identifier → module specifier or URL
      */
-    private static function controllers(array $tabs, array $prepared): array
+    private static function controllers(array $tabs, array $prepared, AdminManager $manager): array
     {
         $controllers = array();
 
@@ -645,6 +645,24 @@ final class FormController
         }
 
         foreach ($prepared as $field) {
+            /*
+             * A PROJECT WIDGET BRINGS ITS OWN CONTROLLER, AND IT NEEDS NO IMPORT-MAP ENTRY. The
+             * layout registers each controller with `await import(<specifier>)` — a dynamic
+             * import, which takes a URL just as happily as a bare name. So the address goes in
+             * here directly and `Importmap::MODULES` stays the package's own list, with no
+             * extension point to maintain.
+             *
+             * THE IDENTIFIER IS THE WIDGET KEY ITSELF, not `admin-<key>`: the project writes the
+             * fragment and therefore the `data-controller` attribute, so the two have to agree on
+             * one rule, and `custom-farbwaehler` is the one name already in play (ADR 0027 §2).
+             * It also keeps the project out of the package's `admin-*` identifiers.
+             */
+            if (str_starts_with($field['fragment'], WidgetRegistry::PROJECT_PREFIX)) {
+                $controllers[$field['fragment']] = $manager->projectAssetUrl(
+                    'controllers/'.$field['fragment'].'_controller.js'
+                );
+            }
+
             if ($field['fragment'] === RichText::WIDGET) {
                 $controllers['admin-rte'] = 'admin/rte';
             }

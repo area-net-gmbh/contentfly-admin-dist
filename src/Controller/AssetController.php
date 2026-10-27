@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Areanet\ContentflyAdmin\Controller;
 
+use Areanet\ContentflyAdmin\AdminManager;
 use Areanet\ContentflyAdmin\Asset\MediaTypes;
 use Areanet\ContentflyAdmin\Version;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -35,6 +36,21 @@ final class AssetController
      * The one directory assets are served from. Nothing outside it is reachable.
      */
     private const ASSET_ROOT = __DIR__.'/../../public';
+
+    /**
+     * The one `dir` segment that is served from the PROJECT instead of from the package.
+     *
+     * A reserved segment rather than a second route, because the route's shape is ADR 0007's and
+     * stays untouched: same address, same version segment, same cache promise. The package ships
+     * no `public/project/`, so nothing of its own becomes unreachable.
+     *
+     * WHAT KEEPS THE TWIG SOURCE UNREACHABLE is the media-type allowlist, exactly as it does for
+     * the package: `widget/<key>.html.twig` sits in the same directory, and `twig` is not a type
+     * this route serves (`Asset\MediaTypes`), so asking for it is a 404 like everything else
+     * unknown. The traversal defence is unchanged too — the segment pattern plus the `realpath()`
+     * containment check, now against the project's root.
+     */
+    public const PROJECT_DIR = 'project';
 
     /**
      * A single path segment: starts alphanumeric, then word characters, dot or dash.
@@ -79,7 +95,9 @@ final class AssetController
             return new Response('', 404);
         }
 
-        $path = self::resolve(array($dir, $sub, $file));
+        $path = $dir === self::PROJECT_DIR
+            ? self::resolveProject(array($sub, $file), $this->app[AdminManager::CONTAINER_KEY]->widgetRoot())
+            : self::resolve(array($dir, $sub, $file), self::ASSET_ROOT);
 
         if ($path === null) {
             return new Response('', 404);
@@ -129,8 +147,9 @@ final class AssetController
      * directory. Dropping either one would leave a hole the other does not close.
      *
      * @param array<int,string> $segments in path order, empty entries ignored
+     * @param string             $root     directory the result must stay inside
      */
-    private static function resolve(array $segments): ?string
+    private static function resolve(array $segments, string $root): ?string
     {
         $parts = array();
 
@@ -150,22 +169,39 @@ final class AssetController
             return null;
         }
 
-        $root = realpath(self::ASSET_ROOT);
+        $base = realpath($root);
 
-        if ($root === false) {
+        if ($base === false) {
             return null;
         }
 
-        $path = realpath($root.'/'.implode('/', $parts));
+        $path = realpath($base.'/'.implode('/', $parts));
 
         if ($path === false || !is_file($path)) {
             return null;
         }
 
-        if (strpos($path, $root.DIRECTORY_SEPARATOR) !== 0) {
+        if (strpos($path, $base.DIRECTORY_SEPARATOR) !== 0) {
             return null;
         }
 
         return $path;
+    }
+
+    /**
+     * The same resolution against the project's widget directory, or `null` without one.
+     *
+     * A project that configured no `widgetRoot` has no project assets, and the segment then
+     * behaves like any other address that leads nowhere: 404, indistinguishable from a typo.
+     *
+     * @param array<int,string> $segments
+     */
+    private static function resolveProject(array $segments, string $root): ?string
+    {
+        if ($root === '') {
+            return null;
+        }
+
+        return self::resolve($segments, $root);
     }
 }
