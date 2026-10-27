@@ -63,6 +63,30 @@
     box for all of them. Without JavaScript all of it works; what is missing is the confirmation
     before a delete, which `admin/list-select` adds.
 
+    THE PROJECT'S RECORD ACTIONS ARE MORE SUBMIT BUTTONS OF THE SAME FORM (005-004-0004), for
+    the reason the two above are: a second form inside this one is not allowed. A row button
+    carries `selection.rowField` with its own record id, and the dispatcher then does not read
+    `ids[]` at all — without that, pressing a button in row three would silently take every
+    ticked row with it (ADR 0029 §4). A bulk button carries no id and gets the ticked ones. Both
+    point at the same address through `formaction`; only the id tells them apart.
+
+    THOSE BUTTONS CARRY `data-turbo="false"`, AND THAT IS NOT COSMETIC. Their main case is a file
+    download, and a response Turbo fetched is a response the browser never offers to save — the
+    click would do nothing at all, without an error. The attribute is part of the contract, which
+    is why it is written here and stated in ADR 0029 §8 rather than left to be rediscovered.
+
+    THE ROW BUTTON IS `admin-list__action-run` AND NOT `admin-list__row-action`, which looks
+    like a worse name and is the safe one. `tools/harness-liste-pruefen.php` counts the rows by
+    occurrences of the string `admin-list__row` and `tools/harness-projekt-seite-pruefen.php`
+    does the same — any class beginning with it would be counted as a row, so three rows with
+    two actions each would report as nine. The selection column one paragraph up carries the
+    identical warning; this is the second time that substring has had to be avoided.
+
+    AN `icon` BECOMES A HOOK, NOT A GLYPH. This package ships no icon set on purpose (`admin.css`
+    says why), so it cannot draw one; it emits `data-icon` and a modifier class, and a project
+    that wants a picture puts it there from its own stylesheet. The label is always written out,
+    so the button stays readable with no icon and with an icon nobody styled.
+
     THE REPORT OF A FINISHED ACTION STANDS ABOVE THE BAR. `BulkController` redirects back here
     with the action, two counts and at most a few ids, and `ListController::report()` composes the
     sentence — the URL never carries prose.
@@ -181,6 +205,14 @@
 {% if row.editUrl %}
                     <a href="{{ row.editUrl }}">Bearbeiten</a>
 {% endif %}
+{% if selection and row.id %}
+{% for action in rowActions %}
+                    <button type="submit" class="admin-list__action-run{% if action.icon %} admin-list__action-run--icon{% endif %}"
+                            name="{{ selection.rowField }}" value="{{ row.id }}"
+                            formaction="{{ action.url }}" formmethod="post" data-turbo="false"
+                            {% if action.icon %}data-icon="{{ action.icon }}" {% endif %}>{{ action.label }}</button>
+{% endfor %}
+{% endif %}
                 </td>
             </tr>
 {% endfor %}
@@ -192,6 +224,11 @@
                   data-admin-list-select-target="count">Keine Zeile markiert</span>
             <button type="submit" class="admin-list__bulk-delete"
                     name="{{ selection.actionField }}" value="{{ selection.delete }}">Löschen</button>
+{% for action in rowActions %}{% if action.bulk %}
+            <button type="submit" class="admin-list__bulk-action{% if action.icon %} admin-list__bulk-action--icon{% endif %}"
+                    formaction="{{ action.url }}" formmethod="post" data-turbo="false"
+                    {% if action.icon %}data-icon="{{ action.icon }}" {% endif %}>{{ action.label }}</button>
+{% endif %}{% endfor %}
 {% if selection.fields is not empty %}
             <details class="admin-list__bulk-change">
                 <summary>Ein Feld ändern</summary>

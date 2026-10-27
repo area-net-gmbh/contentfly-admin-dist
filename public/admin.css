@@ -1066,6 +1066,28 @@ li {
 }
 
 /*
+ * The project's record actions (005-004-0004).
+ *
+ * THEY ARE LEFT AS PLAIN BUTTONS, like the bulk delete and the apply button beside them. A
+ * style of their own would make a project's action look more important than the admin's own
+ * two, and nothing here knows whether it is.
+ *
+ * THE ROW BUTTON ONLY NEEDS SPACING. Its cell is `white-space: nowrap` and already holds the
+ * edit link, so the gap is the whole job; the cell grows with the number of actions, which is
+ * the project's decision and not this file's to limit.
+ *
+ * NO RULE FOR `--icon` AND NO GLYPH ANYWHERE. This package ships no icon set — the same reason
+ * the sort marker is a pseudo-element and the file type is centred text. `data-icon` and the
+ * modifier class are hooks for a project's own stylesheet; the label is written out regardless,
+ * so an unstyled icon costs legibility nothing.
+ */
+
+.admin-list__action-run {
+    margin-left: 0.5rem;
+}
+
+
+/*
  * The report of a finished bulk action, and the controls that start one (002-004-0005).
  *
  * THE PROBLEM VARIANT USES THE DANGER TOKENS THE FORM ALREADY DEFINES, rather than a second pair

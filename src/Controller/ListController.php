@@ -7,6 +7,9 @@ namespace Areanet\ContentflyAdmin\Controller;
 use Areanet\ContentflyAdmin\AdminManager;
 use Areanet\ContentflyAdmin\Asset\Importmap;
 use Areanet\ContentflyAdmin\Auth\FormToken;
+use Areanet\ContentflyAdmin\Auth\PermissionView;
+use Areanet\ContentflyAdmin\Page\PagePermission;
+use Areanet\ContentflyAdmin\Page\RowActionRegistry;
 use Areanet\ContentflyAdmin\Schema\SchemaClient;
 use Areanet\ContentflyAdmin\View\ColumnBuilder;
 use Areanet\ContentflyAdmin\View\EntityView;
@@ -235,6 +238,13 @@ final class ListController
             'columns'    => self::sortableColumns($columns, $base, $query, $sort, $direction, $page),
             'rows'       => $rows,
             'selection'  => $selection,
+            /*
+             * NO SELECTION, NO ACTIONS. The buttons live inside the bulk form, and that form is
+             * only rendered where `selection` is set — which is exactly where at least one row
+             * has an id (`self::selection()`). An action without a record to act on has nothing
+             * to offer, so the two conditions are one.
+             */
+            'rowActions' => $selection === null ? array() : $this->rowActions($name, $manager->getPrefix()),
             'report'     => self::report($request),
             'newUrl'     => $formBase,
             'queryForm'   => $queryForm,
@@ -776,7 +786,7 @@ final class ListController
      * @param list<array{cells: array<string,string>, id: string|null, editUrl: string|null}> $rows
      * @param array<string,string|array<string,string>|null>                                  $order
      *
-     * @return array{action: string, tokenField: string, token: string, query: string, actionField: string, delete: string, change: string}|null
+     * @return array{action: string, tokenField: string, token: string, query: string, actionField: string, rowField: string, delete: string, change: string}|null
      */
     private static function selection(
         array $rows,
@@ -797,6 +807,7 @@ final class ListController
                     'token'       => $token,
                     'query'       => (string) parse_url($here, PHP_URL_QUERY),
                     'actionField' => BulkController::ACTION_FIELD,
+                    'rowField'    => RowActionController::ROW_FIELD,
                     'delete'      => BulkController::DELETE,
                     'change'      => BulkController::CHANGE,
                 );
@@ -833,4 +844,45 @@ final class ListController
 
         return is_scalar($value) ? (string) $value : self::EMPTY_CELL;
     }
+    /**
+     * The project's record actions for this entity, as the list offers them.
+     *
+     * AN ACTION APPEARS ONLY WHERE THE EDITOR HOLDS ITS RIGHT, and the answer comes from the same
+     * `PagePermission` the dispatcher asks before it calls (ADR 0028 §3). The discipline is the
+     * one `View\MenuBuilder::pageItems()` keeps for pages and `Controller\GuardsPermissions` for
+     * the entity routes: a button on an action that then refuses itself is a dead button, and the
+     * inverse — reachable but hidden — is worse.
+     *
+     * THE READ RIGHT IS NOT RE-ASKED HERE. Reaching this method means `listAction()` already
+     * passed `mayRead()`; an action without a `permission` of its own therefore appears for
+     * everybody who can see the list at all, which is exactly what the attribute promises.
+     *
+     * ONE URL FOR BOTH BUTTONS. The row button and the bulk button of one action post to the
+     * same address and differ only in whether they carry a record id — that is the whole of
+     * ADR 0029 §4, and keeping one url here is what makes it hard to get wrong in the template.
+     *
+     * @return list<array{key: string, label: string, icon: string|null, bulk: bool, url: string}>
+     */
+    private function rowActions(string $entity, string $prefix): array
+    {
+        $offered = array();
+
+        foreach ($this->app[RowActionRegistry::CONTAINER_KEY]->forEntity($entity) as $action) {
+            if ($action->permission !== null
+                && !PagePermission::parse($action->permission)->isGranted($this->app[PermissionView::CONTAINER_KEY])) {
+                continue;
+            }
+
+            $offered[] = array(
+                'key'   => $action->key,
+                'label' => $action->label,
+                'icon'  => $action->icon,
+                'bulk'  => $action->bulk,
+                'url'   => $prefix.'/'.RowActionRegistry::SEGMENT.'/'.MenuBuilder::entityToUrl($entity).'/'.$action->key,
+            );
+        }
+
+        return $offered;
+    }
+
 }
