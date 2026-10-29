@@ -4,11 +4,7 @@ declare(strict_types=1);
 
 namespace Areanet\ContentflyAdmin\Controller;
 
-use Areanet\ContentflyAdmin\AdminManager;
-use Areanet\ContentflyAdmin\Asset\Importmap;
 use Areanet\ContentflyAdmin\Auth\PermissionView;
-use Areanet\ContentflyAdmin\View\MenuBuilder;
-use Areanet\ContentflyAdmin\View\TemplateRenderer;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -54,6 +50,8 @@ use Symfony\Component\HttpFoundation\Response;
  */
 trait GuardsPermissions
 {
+    use RendersRefusalPage;
+
     private function mayRead(string $entity): bool
     {
         return $this->app[PermissionView::CONTAINER_KEY]->mayRead($entity);
@@ -117,27 +115,6 @@ trait GuardsPermissions
             .'Wende dich an eine Administratorin oder einen Administrator, '
             .'wenn du damit arbeiten musst.'
         );
-    }
-
-    /**
-     * The one place a refusal becomes a page, so the two messages above cannot drift into two
-     * different-looking pages.
-     */
-    private function refusalPage(string $heading, string $message): Response
-    {
-        $manager = $this->app[AdminManager::CONTAINER_KEY];
-
-        $html = $this->app[TemplateRenderer::CONTAINER_KEY]->render('refused.html.twig', array(
-            'title'      => $heading.' — '.$manager->getTitle(),
-            'stylesheet' => $manager->assetUrl('admin.css'),
-            'importmap'  => Importmap::scriptTag($manager),
-            'menu'       => $this->app[MenuBuilder::CONTAINER_KEY]->build(),
-            'logoutUrl'  => $manager->getPrefix().'/logout',
-            'heading'    => $heading,
-            'message'    => $message,
-        ));
-
-        return new Response($html, 403, array('Content-Type' => 'text/html; charset=UTF-8'));
     }
 
     /**

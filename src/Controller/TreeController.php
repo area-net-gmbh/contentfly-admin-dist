@@ -65,6 +65,21 @@ final class TreeController
     public const FORMAT_JSON = 'json';
 
     /**
+     * The code a report carries when the core answered nothing an envelope could be read from.
+     *
+     * THE SAME MARKER `BulkController` ALREADY USES, and for the same reason it documents: a
+     * failure inside a sub-request does not always come back as an envelope — with devmode on the
+     * core answers its debug page and `Envelope::read()` has nothing to decode. Until story
+     * 007-001 this controller read only `ok` and `error`, so that case arrived here as an empty
+     * code and the editor was told the delete was "refused" with no reason at all, which reads as
+     * if the core had given none.
+     *
+     * NOT AN INVENTED ERROR CODE but a marker of this package, which is why it carries no
+     * `contentfly_` prefix and why `systemNote()` turns it into a sentence instead of printing it.
+     */
+    public const UNREADABLE = 'unreadable';
+
+    /**
      * One tree entity's records.
      *
      * The route is registered `isSecure = true`, so `auth.user` is set by the time the core is
@@ -272,7 +287,7 @@ final class TreeController
             return self::back($base, array('done' => 'deleted', 'count' => (string) $removed));
         }
 
-        $code = is_array($envelope['error']) ? ($envelope['error']['code'] ?? '') : '';
+        $code = self::reportCode($envelope);
 
         return self::back($base, array(
             'done'    => $removed === 0 ? 'failed' : 'partial',
@@ -404,8 +419,7 @@ final class TreeController
         $landed = self::parentIdOf($after, $id);
         $wanted = $parent === '' ? null : $parent;
 
-        $code = is_array($envelope['error']) ? ($envelope['error']['code'] ?? '') : '';
-        $code = is_string($code) ? $code : '';
+        $code = self::reportCode($envelope);
 
         if ($envelope['ok'] && $landed === $wanted) {
             $outcome = 'ok';
@@ -511,6 +525,48 @@ final class TreeController
     }
 
     /**
+    /**
+     * The code a report carries for one envelope: the core's own, or the marker for no envelope.
+     *
+     * `readable` IS ASKED FIRST because it answers a different question than `error`. An
+     * unreadable answer has no `errors` array to look in, so reading `error` alone cannot tell
+     * "the core refused and said why" from "the core never answered in a form we can read" —
+     * both arrive as an empty code.
+     *
+     * @param array{ok: bool, readable: bool, data: mixed, error: array<string,mixed>|null} $envelope
+     */
+    private static function reportCode(array $envelope): string
+    {
+        if (!$envelope['readable']) {
+            return self::UNREADABLE;
+        }
+
+        $code = is_array($envelope['error']) ? ($envelope['error']['code'] ?? '') : '';
+
+        return is_string($code) ? $code : '';
+    }
+
+    /**
+     * What a report appends about the system's own answer, if it has anything to append.
+     *
+     * THE MARKER BECOMES A SENTENCE HERE, in one place, because it is not a message key the core
+     * sent — printing it as one would show the editor the word "unreadable" and call it the
+     * system's message.
+     */
+    private static function systemNote(string $code): string
+    {
+        if ($code === '') {
+            return '';
+        }
+
+        if ($code === self::UNREADABLE) {
+            return ' Die Antwort des Grundsystems war nicht auswertbar.';
+        }
+
+        return ' Meldung des Systems: '.$code;
+    }
+
+    /**
      * The sentence the page shows about the delete that just ran, or `null` when none did.
      *
      * THE PARTIAL CASE GETS ITS OWN SENTENCE, and it is the reason this method exists rather than
@@ -544,11 +600,11 @@ final class TreeController
                 return array('ok' => false, 'text' =>
                     'Das Löschen wurde abgelehnt, aber nicht ohne Wirkung: '.$count.' von '
                     .$total.' Knoten dieses Teilbaums sind entfernt. Der Baum unten zeigt den '
-                    .'gespeicherten Stand.'.($code === '' ? '' : ' Meldung des Systems: '.$code));
+                    .'gespeicherten Stand.'.self::systemNote($code));
             case 'failed':
                 return array('ok' => false, 'text' =>
                     'Das Löschen wurde abgelehnt, es wurde nichts entfernt.'
-                    .($code === '' ? '' : ' Meldung des Systems: '.$code));
+                    .self::systemNote($code));
             case 'forbidden':
                 return array('ok' => false, 'text' => 'Für das Löschen fehlt dir die Berechtigung.');
             case 'expired':
@@ -578,7 +634,7 @@ final class TreeController
      */
     private static function moveReport(string $moved, string $code): ?array
     {
-        $system = $code === '' ? '' : ' Meldung des Systems: '.$code;
+        $system = self::systemNote($code);
 
         switch ($moved) {
             case 'ok':

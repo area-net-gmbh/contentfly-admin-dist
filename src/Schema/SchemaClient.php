@@ -105,13 +105,38 @@ final class SchemaClient
      *
      * @return array<string,mixed> Entity names to their `settings` and `properties`, plus the
      *                             core's own `_hash` entry
+     *
+     * @throws \InvalidArgumentException when the core does not answer an array, or when the `ui`
+     *                                   option names an entity or field the schema does not have.
+     *                                   `GuardsCoreVersion::guard()` catches both and names them.
      */
     public function getSchema(): array
     {
         if ($this->schema === null) {
             ++$this->reads;
 
-            $this->schema = self::applyUi((new Api($this->app))->getSchema(), $this->ui);
+            $raw = (new Api($this->app))->getSchema();
+
+            /*
+             * THE CORE'S ANSWER IS CHECKED BEFORE IT IS MERGED INTO. `applyUi()` takes an array
+             * and indexes into it; handing it something else turned a core that answered oddly
+             * into a type error several frames away from its cause. Story 007-001 asks for the
+             * named failure instead, and the name has to come from here because this is the only
+             * place that knows what was expected.
+             *
+             * It is reported as a misconfiguration, which is where it lands for the reader: the
+             * caller that catches this is `GuardsCoreVersion::guard()`, and whoever sees it is
+             * installing the package, not editing with it.
+             */
+            if (!is_array($raw)) {
+                throw new \InvalidArgumentException(sprintf(
+                    'The core answered its schema as %s instead of an array. '
+                    .'Check that this project boots a complete Contentfly core.',
+                    gettype($raw)
+                ));
+            }
+
+            $this->schema = self::applyUi($raw, $this->ui);
         }
 
         return $this->schema;

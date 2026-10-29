@@ -47,6 +47,7 @@ final class ListController
 {
     use GuardsCoreVersion;
     use GuardsPermissions;
+    use ReportsCoreFailure;
 
     /**
      * How many records one page shows.
@@ -135,18 +136,37 @@ final class ListController
         $term       = $searchable ? self::searchTerm($request) : null;
         $where      = self::where($selected, $term);
 
-        $result = (new Api($this->app, $request))->getList(
-            $name,
-            $where,
-            $sort === null ? null : array($sort => $direction),
-            null,
-            array_column($columns, 'property'),
-            null,
-            false,
-            $page,
-            self::ITEMS_PER_PAGE,
-            $language
-        );
+        /*
+         * THIS CALL WAS THE ONE READ IN THE PACKAGE WITH NO `catch` AT ALL, which is what story
+         * 007-001 found: `getList()` reaches the database, the per-record permission rule and
+         * every `before` hook a project registered, and any of them failing answered the editor
+         * with the core's debug page or a blank one.
+         *
+         * `\Throwable` AND NOT `ContentflyException` — and deliberately not both, because here
+         * they would answer the same. The three reads that catch `ContentflyException` alone use
+         * it to mean "not there, or not yours" and answer 404; a list is not one record. The
+         * entity was already cleared by the whitelist and the permission check above, so a
+         * refusal arriving at *this* call is about the query or the core, not about something the
+         * editor named by id — ADR 0019 leaves the per-record rule to the core, and `getList()`
+         * answers that by omitting rows rather than by throwing. Two branches with one body would
+         * only claim a distinction this call cannot support.
+         */
+        try {
+            $result = (new Api($this->app, $request))->getList(
+                $name,
+                $where,
+                $sort === null ? null : array($sort => $direction),
+                null,
+                array_column($columns, 'property'),
+                null,
+                false,
+                $page,
+                self::ITEMS_PER_PAGE,
+                $language
+            );
+        } catch (\Throwable $failed) {
+            return $this->coreFailurePage('Die Liste');
+        }
 
         /*
          * `getList()` ANSWERS `null` FOR AN EMPTY RESULT, not an empty list — it returns before
