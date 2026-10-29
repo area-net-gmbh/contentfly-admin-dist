@@ -83,7 +83,18 @@ final class AdminManager
         'rowActions'     => null,
         'widgets'        => null,
         'widgetRoot'     => '',
+        'ui'             => [],
     ];
+
+    /**
+     * The settings one entity may state in the `ui` option — stage 3 of the shaping cascade.
+     *
+     * Whitelist and documentation in one, the same double duty `DEFAULTS` does for the options
+     * themselves. The names come from concept section 8 and are deliberately kept, the clash
+     * included: this `widgets` shares its name with the option `widgets`, because the option
+     * *provides* an element while this setting *chooses* one (ADR 0031).
+     */
+    private const UI_KEYS = ['label', 'list', 'tabs', 'widgets'];
 
     /**
      * Path segments the project's `.htaccess` answers with 403.
@@ -137,6 +148,12 @@ final class AdminManager
     private string $widgetRoot;
 
     /**
+     * @var array<string,array<string,mixed>> Stage 3 of the shaping cascade, keyed by entity
+     *      name; empty means the project states nothing and stages 2 and 1 decide alone.
+     */
+    private array $ui;
+
+    /**
      * @param array<string,mixed> $options See self::DEFAULTS for the accepted keys.
      *
      * @throws \InvalidArgumentException on an unknown option or an unusable prefix
@@ -166,6 +183,7 @@ final class AdminManager
         $this->rowActions       = self::validateRowActions($options['rowActions']);
         $this->widgets          = self::validateWidgets($options['widgets']);
         $this->widgetRoot       = self::validateWidgetRoot($options['widgetRoot']);
+        $this->ui               = self::validateUi($options['ui']);
 
         $this->registerServices();
         $this->registerPages();
@@ -1063,6 +1081,155 @@ final class AdminManager
         }
 
         return \Closure::fromCallable($value);
+    }
+
+    /**
+     * The `ui` option: stage 3 of the shaping cascade, the project's own UI configuration.
+     *
+     * THE VALUE IS THE ARRAY, NOT A PATH TO IT. A project writes
+     * `'ui' => require __DIR__ . '/admin.php'`, so the `require` stays on the project's side.
+     * That spares this package a project-root notion it has nowhere else, and it keeps the
+     * package-wide promise ADR 0028 narrowed down: setting an option touches no file system.
+     *
+     * ONLY THE FORM IS CHECKED HERE, NEVER THE EXISTENCE. Whether an entity key or a field name
+     * occurs in the schema at all is checked by the merge in `SchemaClient::getSchema()`. It
+     * cannot be checked here: the constructor must not load the schema (ADR 0028), which is also
+     * why `getEntities()` reads it only on access. Both halves fail loudly and both name the
+     * entity and the key, because a typo in a third configuration layer is silent otherwise and
+     * "my configuration does nothing" is the most expensive failure this layer can produce
+     * (ADR 0031).
+     *
+     * @param mixed $ui
+     *
+     * @return array<string,array<string,mixed>>
+     *
+     * @throws \InvalidArgumentException on anything but the four settings of UI_KEYS, in shape
+     */
+    private static function validateUi($ui): array
+    {
+        if (!is_array($ui)) {
+            throw new \InvalidArgumentException('The option "ui" must be an array of entity name => settings, for example ["Angebot" => ["label" => "Maschinen"]]. It is usually written as \'ui\' => require __DIR__ . \'/admin.php\'. Leave it out to configure nothing.');
+        }
+
+        $checked = array();
+
+        foreach ($ui as $entity => $settings) {
+            if (!is_string($entity) || $entity === '') {
+                throw new \InvalidArgumentException('The option "ui" must be keyed by non-empty entity names, for example "Angebot" or "PIM\File".');
+            }
+
+            if (!is_array($settings)) {
+                throw new \InvalidArgumentException(sprintf('Entity "%s" in the option "ui" must hold an array of settings, for example ["label" => "Maschinen"].', $entity));
+            }
+
+            $unknown = array_diff(array_keys($settings), self::UI_KEYS);
+            if ($unknown !== []) {
+                throw new \InvalidArgumentException(sprintf(
+                    'Unknown setting(s) for entity "%s" in the option "ui": %s. Known are: %s.',
+                    $entity,
+                    implode(', ', array_map('strval', $unknown)),
+                    implode(', ', self::UI_KEYS)
+                ));
+            }
+
+            $entry = array();
+
+            if (array_key_exists('label', $settings)) {
+                if (!is_string($settings['label']) || $settings['label'] === '') {
+                    throw new \InvalidArgumentException(sprintf('The setting "label" of entity "%s" in the option "ui" must be a non-empty string.', $entity));
+                }
+
+                $entry['label'] = $settings['label'];
+            }
+
+            if (array_key_exists('list', $settings)) {
+                $entry['list'] = self::validateUiFieldNames($settings['list'], $entity, 'list');
+            }
+
+            if (array_key_exists('tabs', $settings)) {
+                if (!is_array($settings['tabs'])) {
+                    throw new \InvalidArgumentException(sprintf('The setting "tabs" of entity "%s" in the option "ui" must be an array of tab name => field names.', $entity));
+                }
+
+                $tabs = array();
+
+                foreach ($settings['tabs'] as $tab => $fields) {
+                    if (!is_string($tab) || $tab === '') {
+                        throw new \InvalidArgumentException(sprintf('The setting "tabs" of entity "%s" in the option "ui" must be keyed by non-empty tab names.', $entity));
+                    }
+
+                    $tabs[$tab] = self::validateUiFieldNames($fields, $entity, sprintf('tabs.%s', $tab));
+                }
+
+                /*
+                 * THE KEY ORDER IS DATA HERE, not an accident of writing. It is the tab order of
+                 * the form (005-005-0005), so the array is taken as it was written and never
+                 * sorted on the way through.
+                 */
+                $entry['tabs'] = $tabs;
+            }
+
+            if (array_key_exists('widgets', $settings)) {
+                if (!is_array($settings['widgets'])) {
+                    throw new \InvalidArgumentException(sprintf('The setting "widgets" of entity "%s" in the option "ui" must be an array of field name => widget key.', $entity));
+                }
+
+                $widgets = array();
+
+                foreach ($settings['widgets'] as $field => $key) {
+                    if (!is_string($field) || $field === '') {
+                        throw new \InvalidArgumentException(sprintf('The setting "widgets" of entity "%s" in the option "ui" must be keyed by non-empty field names.', $entity));
+                    }
+
+                    if (!is_string($key) || $key === '') {
+                        throw new \InvalidArgumentException(sprintf('The widget key for field "%s" of entity "%s" in the option "ui" must be a non-empty string, for example "textarea" or "custom-farbwaehler".', $field, $entity));
+                    }
+
+                    /*
+                     * WHETHER THE KEY EXISTS IS NOT DECIDED HERE. A project key is registered
+                     * through the `widgets` option, whose callback runs later, in the registry's
+                     * factory (ADR 0027) — so at this moment the set of valid keys is not yet
+                     * complete. An unknown key resolves the way an unknown key always has.
+                     */
+                    $widgets[$field] = $key;
+                }
+
+                $entry['widgets'] = $widgets;
+            }
+
+            $checked[$entity] = $entry;
+        }
+
+        return $checked;
+    }
+
+    /**
+     * One list of field names inside the `ui` option.
+     *
+     * @param mixed $fields
+     *
+     * @return list<string>
+     *
+     * @throws \InvalidArgumentException when the value is not a list of non-empty field names
+     */
+    private static function validateUiFieldNames($fields, string $entity, string $setting): array
+    {
+        if (!is_array($fields)) {
+            throw new \InvalidArgumentException(sprintf('The setting "%s" of entity "%s" in the option "ui" must be a list of field names, for example ["angebotsnr", "thema"].', $setting, $entity));
+        }
+
+        foreach ($fields as $field) {
+            if (!is_string($field) || $field === '') {
+                throw new \InvalidArgumentException(sprintf('The setting "%s" of entity "%s" in the option "ui" must contain non-empty field names only.', $setting, $entity));
+            }
+        }
+
+        /*
+         * THE ORDER IS KEPT AND THE KEYS ARE DROPPED. The order is the stated column or field
+         * order (005-005-0003); the keys never carried meaning, and a gap in them would travel
+         * into the merge as a hole.
+         */
+        return array_values($fields);
     }
 
     private static function validateThumbnailAliases($aliases): array
