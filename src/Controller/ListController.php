@@ -227,6 +227,13 @@ final class ListController
             'logoutUrl'  => $manager->getPrefix().'/logout',
             'entity'     => $name,
             /*
+             * THE HEADING TAKES THE LABEL, THE REST KEEPS THE NAME. `entity` is also an
+             * address and a data attribute, so a configured label must not replace it --
+             * it is a display name, and two entities may carry the same one
+             * (005-005-0004).
+             */
+            'entityLabel' => $this->app[EntityView::CONTAINER_KEY]->label($name),
+            /*
              * THE WAY BACK TO THE TREE, and `null` for every other entity (ADR 0025). A tree
              * entity's menu entry points at `/tree`, so this list is reachable only through the
              * switch on that page — without the counterpart here the editor who used it would

@@ -161,9 +161,18 @@ final class MenuBuilder
              * exist for the POST half of the `match()`.
              */
             if ($entity === FileController::ENTITY_FILE) {
+                /*
+                 * A CONFIGURED LABEL BEATS THE HARD-CODED ONE, and that is the decision rather
+                 * than an oversight. `PIM\File` belongs to the core, so a project cannot put an
+                 * attribute on it — stage 3 is the only lever it has there, and being the only
+                 * lever for the core's entities is the whole reason stage 3 shipped in v1
+                 * (ADR 0031). `Dateien` stays the fallback, so nothing changes for a project that
+                 * configures nothing. `PIM\Folder` has no entry at all (skipped above), so a
+                 * label on it has no reader — the scope limit ADR 0031 names.
+                 */
                 $items[] = array(
                     'entity'       => $entity,
-                    'label'        => 'Dateien',
+                    'label'        => $this->entityView->label($entity, 'Dateien'),
                     'url'          => $this->manager->getPrefix().'/files/',
                     'groupHeading' => null,
                 );
@@ -180,7 +189,7 @@ final class MenuBuilder
 
             $items[] = array(
                 'entity'       => $entity,
-                'label'        => $entity,
+                'label'        => $this->entityView->label($entity),
                 'url'          => $this->manager->getPrefix().$area.self::entityToUrl($entity),
                 'groupHeading' => null,
             );
@@ -249,8 +258,11 @@ final class MenuBuilder
     /**
      * The URL segment that addresses one entity.
      *
-     * The label stays the schema name untouched, because a friendlier label is a question of its
-     * own — it would need a source (schema, translation) that does not exist yet.
+     * The URL segment stays derived from the schema name and is unaffected by any label. Since
+     * story 005-005 a friendlier label does have a source — `ui[<entity>]['label']`, read through
+     * `EntityView::label()` — but it is a display name and must never reach an address: two
+     * projects could configure the same label, and a route derived from it would stop being the
+     * entity's own.
      *
      * `tools/harness-admin-pruefen.php` used to require *every* entity name of the schema in the
      * page body. Since story 003-001 that is no longer true for `PIM\File` and `PIM\Folder`:

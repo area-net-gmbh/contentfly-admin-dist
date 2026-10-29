@@ -165,6 +165,13 @@ final class TreeController
             'menu'       => $this->app[MenuBuilder::CONTAINER_KEY]->build(),
             'logoutUrl'  => $manager->getPrefix().'/logout',
             'entity'     => $name,
+            /*
+             * THE HEADING TAKES THE LABEL, THE REST KEEPS THE NAME. `entity` is also an
+             * address and a data attribute, so a configured label must not replace it --
+             * it is a display name, and two entities may carry the same one
+             * (005-005-0004).
+             */
+            'entityLabel' => $this->app[EntityView::CONTAINER_KEY]->label($name),
             'listUrl'    => $listUrl,
             'newUrl'     => $formBase,
             'nodes'      => $nodes,

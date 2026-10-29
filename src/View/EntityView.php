@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Areanet\ContentflyAdmin\View;
 
 use Areanet\ContentflyAdmin\Schema\SchemaClient;
+use Areanet\ContentflyAdmin\Schema\ShapingListener;
 
 /**
  * One entity's schema entry turned into a list definition and a form definition.
@@ -363,6 +364,37 @@ final class EntityView
         $settings = $this->schemaClient->getSchema()[$entity]['settings'] ?? array();
 
         return is_array($settings) && ($settings['type'] ?? null) === 'tree';
+    }
+
+    /**
+     * The display name of one entity — the configured one, or the fallback.
+     *
+     * IT LIVES HERE FOR THE REASON `isTree()` DOES: four callers ask it, the menu and the three
+     * headings, and written four times those are four chances to disagree about where an entity's
+     * name comes from. Before stage 3 there was no answer at all — the menu showed the raw schema
+     * name and the headings did the same (005-005-0004).
+     *
+     * THE FALLBACK IS THE RAW NAME AND NOT A HUMANISED ONE. That is exactly what those four
+     * places showed before, and the design rule is that an admin nobody configured does not
+     * change. Humanising belongs to field labels (`ColumnBuilder`), where it always was.
+     *
+     * @param string      $entity   Entity name as the schema spells it, e.g. `Harness\Feldtyp`
+     * @param string|null $fallback What to show when nothing is configured; the entity name
+     *                              itself when absent. The file manager passes its own, because
+     *                              it never showed the raw name (ADR 0020).
+     */
+    public function label(string $entity, ?string $fallback = null): string
+    {
+        $settings = $this->schemaClient->getSchema()[$entity]['settings'] ?? array();
+        $stated   = is_array($settings)
+            ? ($settings[ShapingListener::SCHEMA_KEY]['label'] ?? null)
+            : null;
+
+        if (is_string($stated) && $stated !== '') {
+            return $stated;
+        }
+
+        return $fallback ?? $entity;
     }
 
     /**
