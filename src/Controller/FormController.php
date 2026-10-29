@@ -1038,6 +1038,24 @@ final class FormController
                  * or a browser rejects the decimal's own values.
                  */
                 'type'      => $widget['type'] ?? null,
+                /*
+                 * WHETHER THIS FIELD IS HERE BECAUSE NOBODY KNOWS HOW TO EDIT IT (007-001-0006).
+                 *
+                 * Three unrelated things render through `widget/readonly.html.twig` and the
+                 * fragment name cannot tell them apart: a field the entity marks `readonly`, a
+                 * value the core computes, and a type this package has no element for. Only the
+                 * last one is a gap, and until now it looked exactly like the other two — a value
+                 * or a dash, which is the silent omission story 007-001 set out to remove.
+                 *
+                 * IT IS DERIVED, NOT A NEW FLAG. `WidgetResolver::fallback()` is the only place
+                 * that answers the widget key `readonly` itself, and it does so only for a type
+                 * outside the allowlist; every deliberate `readonly` arrives either as an
+                 * override (`overridden`) or with its own inferred key and the `readonly` fact on
+                 * top. So the two values the resolver already carries say it, and nothing new has
+                 * to be invented to recognise the fallback.
+                 */
+                'unsupported' => ($widget['widget'] ?? null) === WidgetResolver::FALLBACK_WIDGET
+                    && ($widget['overridden'] ?? false) !== true,
                 'required'  => ($widget['required'] ?? false) === true,
                 'maxlength' => $widget['maxlength'] ?? null,
                 'options'   => $prepared[$property]['options'] ?? array(),

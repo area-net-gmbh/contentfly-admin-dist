@@ -13,6 +13,21 @@
     The dash belongs to this case alone. `FormController::value()` answers the empty string for
     anything it cannot print, and in an input that would be a value an editor could save by
     accident.
+
+    ONE OF THE THREE SAYS SO SINCE 007-001-0006. For the first two — a field marked `readonly`
+    and a computed value — showing the value is the whole and correct answer. For the third it
+    was a silent omission: an unsupported type was indistinguishable from an empty field, so an
+    editor looking for a missing input had no way to learn that none exists. `field.unsupported`
+    is the only one of the three that is a gap, and it now names itself and the type.
+
+    THE VALUE STAYS ABOVE THE HINT. Whoever reads this still needs to see what is stored — the
+    hint explains why there is nothing to type in, it does not replace the content.
 #}
 {% include 'widget/_label.html.twig' %}
             <p class="admin-form__display" id="field-{{ field.property }}">{{ field.value ?: '—' }}</p>
+{% if field.unsupported|default(false) %}
+            <p class="admin-form__unsupported" role="note">Für den Feldtyp
+                <code>{{ field.type|default('(ohne Typangabe)') }}</code> gibt es in dieser
+                Oberfläche kein Bedienelement — der Wert wird angezeigt, aber nicht zum Bearbeiten
+                angeboten. Ein Projekt kann dafür ein eigenes Bedienelement hinterlegen.</p>
+{% endif %}

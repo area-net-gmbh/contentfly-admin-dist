@@ -392,6 +392,25 @@ li {
 }
 
 /*
+ * The note under a field whose type this package has no element for (007-001-0006).
+ *
+ * IT LOOKS LIKE A NOTE AND NOT LIKE AN ERROR. Nobody did anything wrong: the type is simply one
+ * the package does not edit, and the danger colouring of `.admin-form__error` would send an
+ * editor looking for a mistake of their own. The muted text and the quieter rule say "this is
+ * how it is" rather than "fix this".
+ */
+.admin-form__unsupported {
+    max-width: 44rem;
+    margin: 0.25rem 0 0;
+    font-size: 0.875rem;
+    color: var(--admin-muted);
+}
+
+.admin-form__unsupported code {
+    font-size: inherit;
+}
+
+/*
  * A field that is shown and not offered — a relation, a file, a permission matrix, anything
  * the schema marks `readonly`. It deliberately does not look like a disabled input: a greyed
  * control invites clicking and suggests that something could unlock it. This is text.
