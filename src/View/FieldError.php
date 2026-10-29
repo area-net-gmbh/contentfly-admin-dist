@@ -72,6 +72,27 @@ final class FieldError
     private const UNREADABLE = 'Das Speichern wurde abgelehnt, und die Antwort des Grundsystems war nicht auswertbar.';
 
     /**
+     * Message keys that are never about one field, whatever their context looks like.
+     *
+     * A REFUSED RIGHT IS ABOUT THE OPERATION, NOT ABOUT AN INPUT. Pinning "Für diese Änderung
+     * fehlt die Berechtigung" to one field tells the editor that the other eleven were fine and
+     * sends them looking for a typo they did not make.
+     *
+     * AND THE CONTEXT CANNOT BE TRUSTED HERE, which is the measured half of this. The core
+     * throws its permission refusals with `context.value` set to `"$entityShortName::$id"` —
+     * `Classes/Api.php:115`, `:284`, `:290` — and that is the *same shape* a type error uses for
+     * `Entity::property`. The two are indistinguishable by pattern, so a record whose id happens
+     * to match a property name would park a permission message at that field. Deciding by code
+     * removes the whole class of mistake instead of betting on ids and property names never
+     * colliding.
+     */
+    private const NEVER_AT_A_FIELD = array(
+        'contentfly_general_access_denied',
+        'contentfly_general_permission_denied',
+        'contentfly_i18n_permission_denied',
+    );
+
+    /**
      * The property one error belongs to, or `null` when it cannot be told.
      *
      * The core's types write `Entity::property — explanation` into `context.value`; the example
@@ -80,12 +101,20 @@ final class FieldError
      * part before `::` and the name after it are read, and the name has to be one the form
      * offers.
      *
+     * A key from `NEVER_AT_A_FIELD` answers `null` before the context is read at all.
+     *
      * @param array<string,mixed>|null $error      One entry of the envelope's `errors`
      * @param list<string>             $properties The properties this form actually shows
      */
     public static function property(?array $error, array $properties): ?string
     {
         if ($error === null) {
+            return null;
+        }
+
+        $code = $error['code'] ?? null;
+
+        if (is_string($code) && in_array($code, self::NEVER_AT_A_FIELD, true)) {
             return null;
         }
 
