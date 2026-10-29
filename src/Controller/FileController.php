@@ -758,7 +758,32 @@ final class FileController
                  * `-1` the *filter* uses: `-1` is the core's convention for "where the relation is
                  * unset" in a `where`, not a value one can write into the relation.
                  */
-                $data = array('folder' => is_string($target) && $target !== '' ? $target : null);
+                $target = is_string($target) && $target !== '' ? $target : null;
+
+                /*
+                 * MOVING INTO A FOLDER NEEDS THE RIGHT ON FOLDERS, not only the one on files. The
+                 * write right above covers the file whose `folder` changes; the folder itself is
+                 * only *referenced*, and a reference to records the editor may not read is the
+                 * same question `OptionsController` asks about a relation target (007-002-0001).
+                 * `mayRead` is therefore the question and not `mayWrite`: a move does not change
+                 * the folder, it points at it.
+                 *
+                 * `mayRead(self::ENTITY_FOLDER)` STEERED ONLY THE DISPLAY so far (`:214`, `:553`)
+                 * — which folders the editor is offered. A hand-built post naming a folder id went
+                 * around that entirely, and the target was written unchecked.
+                 *
+                 * ONLY WHEN A FOLDER IS NAMED. An empty target is the root and references no
+                 * folder, so moving a file *out* of one stays possible — refusing that would turn
+                 * the folder right back into a file right under another name.
+                 *
+                 * ENTITY-WIDE, NOT PER FOLDER. Whether one particular folder is this editor's
+                 * under `OWN` or `GROUP` stays the core's decision (ADR 0019 §4).
+                 */
+                if ($target !== null && !$this->mayRead(self::ENTITY_FOLDER)) {
+                    return self::answer($request, $base, $from, array('done' => 'forbidden'));
+                }
+
+                $data = array('folder' => $target);
             }
 
             $status   = null;
