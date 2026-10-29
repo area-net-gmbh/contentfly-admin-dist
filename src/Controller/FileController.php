@@ -728,12 +728,13 @@ final class FileController
                 return self::answer($request, $base, $from, array('done' => 'forbidden'));
             }
 
+            $status   = null;
             $envelope = $this->callCore($request, '/api/delete', array(
                 'entity' => self::ENTITY_FILE,
                 'id'     => $id,
-            ));
+            ), array(), $status);
 
-            return self::answer($request, $base, $from, self::outcome(self::DELETE, $envelope));
+            return self::answer($request, $base, $from, self::outcome(self::DELETE, $envelope, $status));
         }
 
         if ($action === self::RENAME || $action === self::MOVE) {
@@ -760,13 +761,14 @@ final class FileController
                 $data = array('folder' => is_string($target) && $target !== '' ? $target : null);
             }
 
+            $status   = null;
             $envelope = $this->callCore($request, '/api/update', array(
                 'entity' => self::ENTITY_FILE,
                 'id'     => $id,
                 'data'   => $data,
-            ));
+            ), array(), $status);
 
-            return self::answer($request, $base, $from, self::outcome($action, $envelope));
+            return self::answer($request, $base, $from, self::outcome($action, $envelope, $status));
         }
 
         return self::answer($request, $base, $from, array('done' => 'unknown'));
@@ -874,9 +876,11 @@ final class FileController
      * a code out of that page would be the text-guessing `Schema\Envelope` refuses to do, so the
      * status takes over — 413 and 415 are exactly the two cases that have to stay apart.
      *
-     * The other three write paths pass no status and keep their previous behaviour. They reach
-     * `/api/*` and share the same gap; widening their reports belongs to a task of its own, not
-     * to this branch.
+     * THE OTHER WRITE PATHS PASS IT TOO, SINCE 007-001-0004. They reach `/api/*` and shared the
+     * same gap this once deferred to "a task of its own": without an envelope they reported an
+     * empty code, so a refused delete and a refused rename both read as "failed" with no reason
+     * at all. They now hand their status over as well, and `sentence()` turns the ones that mean
+     * something into a sentence rather than printing `HTTP 413` at an editor.
      *
      * @param array{ok: bool, readable: bool, data: mixed, error: array<string,mixed>|null} $envelope
      *
@@ -973,6 +977,48 @@ final class FileController
 
         if ($done === 'failed') {
             $code = $report['code'] ?? '';
+
+            /*
+             * THE REASONS THE CORE CAN ACTUALLY GIVE, BY BOTH NAMES IT GIVES THEM BY.
+             *
+             * `Classes/File/UploadValidator.php` throws exactly two kinds for a file —
+             * `contentfly_file_too_large` with status 413 (over `upload_max_filesize`, over the
+             * core's own limit, or over `FILE_IMAGE_MAX_PIXELS`) and
+             * `contentfly_file_invalid_type` with 415 (extension, declared type, unreadable
+             * header, or a mismatch between header and declaration). There is no third.
+             *
+             * BOTH SPELLINGS ARE MAPPED BECAUSE WHICH ONE ARRIVES DEPENDS ON `APP_DEBUG`. With
+             * it off the core answers an envelope and `outcome()` takes the message code; with
+             * it on the refusal comes back as the debug page, `Envelope::read()` finds nothing
+             * to decode, and the HTTP status is all that is left — which on that path is the
+             * debug page's own 500, not the exception's 413. Measured: a refused upload against
+             * the development harness reports `HTTP 500`. So the status entries below are the
+             * production spelling of the same two refusals, the code entries the one that
+             * actually appears there, and the generic fallback still catches the harness case
+             * honestly rather than claiming a reason.
+             *
+             * THE TYPE SENTENCE IS WORD FOR WORD THE ONE THE BROWSER ALREADY USES
+             * (`public/controllers/upload_controller.js`, the pre-check before a file is even
+             * sent). The same refusal said twice in two wordings reads like two different
+             * problems.
+             */
+            $tooLarge = 'Die Datei ist größer, als dieser Server annimmt — sie wurde nicht '
+                .'übertragen. Die Grenze lässt sich nur am Server ändern.';
+            $badType  = 'Diese Datei hat einen Typ, der hier nicht vorgesehen ist — sie wurde '
+                .'nicht übertragen.';
+
+            $reasons = array(
+                'contentfly_file_too_large'    => $tooLarge,
+                'HTTP 413'                     => $tooLarge,
+                'contentfly_file_invalid_type' => $badType,
+                'HTTP 415'                     => $badType,
+                'HTTP 403'                     => 'Für diese Datei fehlt dir die Berechtigung — es '
+                    .'wurde nichts geändert.',
+            );
+
+            if (isset($reasons[$code])) {
+                return array('ok' => false, 'text' => $reasons[$code]);
+            }
 
             return array(
                 'ok'   => false,
