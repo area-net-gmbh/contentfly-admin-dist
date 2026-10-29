@@ -8,6 +8,7 @@ use Areanet\ContentflyAdmin\AdminManager;
 use Areanet\ContentflyAdmin\Asset\Importmap;
 use Areanet\ContentflyAdmin\Attribute\AdminAction;
 use Areanet\ContentflyAdmin\Attribute\AdminPage;
+use Areanet\ContentflyAdmin\Auth\FormToken;
 use Areanet\ContentflyAdmin\Auth\PermissionView;
 use Areanet\ContentflyAdmin\Controller\CallsCore;
 use Areanet\ContentflyAdmin\Controller\GuardsCoreVersion;
@@ -114,6 +115,28 @@ abstract class AbstractAdminPage
             }
         }
 
+        /*
+         * A STATE-CHANGING REQUEST CARRIES THE FORM TOKEN. Until 007-002-0004 an
+         * `#[AdminAction(method: 'POST')]` route verified none, and ADR 0030 recorded exactly
+         * that as a point still to be decided. Every entity route has verified it all along
+         * (`BulkController`, `RowActionController`, `FormController`), so a project page was the
+         * one submit path of this admin that another site could reach.
+         *
+         * THE ORDER IS PERMISSION, THEN TOKEN, as in `BulkController` and `RowActionController`:
+         * who the editor is does not depend on which form they arrived from.
+         *
+         * ONLY FOR POST. A `GET` action is a second view of the page and changes nothing. An
+         * `'ANY'` route is therefore checked on the requests that actually are POSTs and not on
+         * its GET half — the attribute's method is what the route accepts, not what arrived.
+         */
+        if ($request->isMethod('POST') && !FormToken::verify($request)) {
+            return $this->refusalPage(
+                'Formular abgelaufen',
+                'Das Formular war zu lange offen, oder es kam nicht von dieser Oberfläche. '
+                .'Lade die Seite neu und schicke es noch einmal ab — gespeichert wurde nichts.'
+            );
+        }
+
         $this->request = $request;
         $this->api     = new Api($this->app, $request);
 
@@ -141,15 +164,39 @@ abstract class AbstractAdminPage
     {
         $manager = $this->app[AdminManager::CONTAINER_KEY];
 
+        /*
+         * THE FORM TOKEN IS A SIXTH LAYOUT VARIABLE, for the reason the other five are set here:
+         * a project should not have to know the mechanism to be protected by it. A page that
+         * posts renders `<input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">`
+         * and is done; the name comes from `FormToken::FIELD` and is deliberately not written
+         * out, because a hand-written one went wrong once already (ADR 0030).
+         */
+        $token = FormToken::issue($this->request);
+
         $html = $this->app[TemplateRenderer::CONTAINER_KEY]->render($template, array_merge(array(
             'title'      => self::declaration()->label.' — '.$manager->getTitle(),
             'stylesheet' => $manager->assetUrl('admin.css'),
             'importmap'  => Importmap::scriptTag($manager),
             'menu'       => $this->app[MenuBuilder::CONTAINER_KEY]->build(),
             'logoutUrl'  => $manager->getPrefix().'/logout',
+            'csrfField'  => FormToken::FIELD,
+            'csrfToken'  => $token,
         ), $context));
 
-        return new Response($html, 200, array('Content-Type' => 'text/html; charset=UTF-8'));
+        $response = new Response($html, 200, array('Content-Type' => 'text/html; charset=UTF-8'));
+
+        /*
+         * THE COOKIE IS SET ONLY WHERE THE BROWSER DOES NOT HOLD IT YET. Reissuing on every
+         * render would invalidate the form a second tab is showing (`FormToken::issue()`), and
+         * without the cookie `verify()` would have nothing to compare the field against.
+         */
+        if (!FormToken::isIssued($this->request, $token)) {
+            $response->headers->setCookie(
+                FormToken::cookie($this->request, $token, $manager->getPrefix())
+            );
+        }
+
+        return $response;
     }
 
     /**
