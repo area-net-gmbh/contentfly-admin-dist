@@ -261,8 +261,10 @@ final class AdminManager
     {
         $this->app[self::CONTAINER_KEY] = $this;
 
-        $this->app[SchemaClient::CONTAINER_KEY] = static function ($app): SchemaClient {
-            return new SchemaClient($app);
+        $ui = $this->ui;
+
+        $this->app[SchemaClient::CONTAINER_KEY] = static function ($app) use ($ui): SchemaClient {
+            return new SchemaClient($app, $ui);
         };
 
         $this->app[VersionGuard::CONTAINER_KEY] = static function (): VersionGuard {
@@ -329,7 +331,7 @@ final class AdminManager
 
         $widgets = $this->widgets;
 
-        $this->app[WidgetRegistry::CONTAINER_KEY] = static function () use ($widgets): WidgetRegistry {
+        $this->app[WidgetRegistry::CONTAINER_KEY] = static function () use ($widgets, $ui): WidgetRegistry {
             /*
              * THE PROJECT'S CALLBACK RUNS HERE, NOT IN THE CONSTRUCTOR, and that is what keeps the
              * promise of this method intact: nothing is read while `custom/app.php` runs, so a
@@ -342,6 +344,25 @@ final class AdminManager
 
             if ($widgets !== null) {
                 $widgets($registry);
+            }
+
+            /*
+             * STAGE 3 REGISTERS LAST, AND THAT IS THE PRECEDENCE. `ui[<entity>]['widgets']` is
+             * routed through the registry rather than merged into the schema, because the
+             * registry is the seam `WidgetResolver::resolve()` already asks — so the choice takes
+             * effect with no change to the resolver, it validates against the key space of
+             * ADR 0027 §3 for free, and `EntityView` reads it as an override and therefore lets
+             * it beat the `rte` attribute (ADR 0027 §4), exactly as the cascade says it should.
+             *
+             * It runs AFTER the project's callback because `registerField()` overwrites: should a
+             * project state the same field in both places, the declarative file wins, which is
+             * the order ADR 0031 fixes for everything else too. Still inside the window — the
+             * seal comes next.
+             */
+            foreach ($ui as $entity => $stated) {
+                foreach ($stated['widgets'] ?? array() as $property => $widget) {
+                    $registry->registerField($entity, (string) $property, $widget);
+                }
             }
 
             $registry->seal();

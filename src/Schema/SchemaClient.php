@@ -81,9 +81,23 @@ final class SchemaClient
 
     private int $reads = 0;
 
-    public function __construct(ApplicationInterface $app)
+    /**
+     * Stage 3 of the shaping cascade, as `AdminManager` validated it.
+     *
+     * Empty is the normal case and means the project states nothing — then this class behaves
+     * exactly as it did before stage 3 existed.
+     *
+     * @var array<string,array<string,mixed>>
+     */
+    private array $ui;
+
+    /**
+     * @param array<string,array<string,mixed>> $ui The `ui` option, already checked for form
+     */
+    public function __construct(ApplicationInterface $app, array $ui = [])
     {
         $this->app = $app;
+        $this->ui  = $ui;
     }
 
     /**
@@ -97,10 +111,188 @@ final class SchemaClient
         if ($this->schema === null) {
             ++$this->reads;
 
-            $this->schema = (new Api($this->app))->getSchema();
+            $this->schema = self::applyUi((new Api($this->app))->getSchema(), $this->ui);
         }
 
         return $this->schema;
+    }
+
+    /**
+     * The project's own UI configuration, merged into the shaping key of the schema.
+     *
+     * WHY HERE AND NOWHERE ELSE. This is the one seam list and form both read the schema
+     * through, and it is held for the process — so the merge runs once and every reader inherits
+     * it without a line of its own: `Shaping`, `ColumnBuilder`, `EntityView` and the
+     * `WidgetResolver` stay exactly as they were, and `listFilters()`, `changeableFields()` and
+     * the four controllers that read through this client are served along the way. Injecting the
+     * data into `Shaping` was the alternative and fails on what that class is: `final`, nothing
+     * but `public static`, no state — the configuration would have to travel through all eleven
+     * of its call sites (ADR 0031).
+     *
+     * IT SITS AFTER THE CORE CALL, WHICH KEEPS THE PERSISTED CACHE HONEST. `Api::getSchema()`
+     * may serve and write `data/cache/schema.cache`; the merge happens on the value it hands
+     * back, so what lands in that file stays the unmodified core schema. A changed
+     * `custom/admin.php` therefore takes effect without anyone clearing a cache — and a process
+     * that runs without the option can never poison the file for one that has it.
+     *
+     * THE LOUD HALF OF THE KEY CHECK LIVES HERE. `AdminManager::validateUi()` has checked the
+     * form, but it cannot check existence: the constructor must not load a schema (ADR 0028),
+     * which is also why `getEntities()` reads it only on access. A typo in an entity key used to
+     * be silent; it is a message now, and the message names what could not be found.
+     *
+     * `widgets` IS DELIBERATELY NOT MERGED. A widget choice reaches the resolver through the
+     * `WidgetRegistry`, which `AdminManager` feeds inside the one window ADR 0027 allows — that
+     * is how the choice takes effect without touching the resolver or the registry. Only the
+     * field names are checked here, so both halves of the configuration answer to one place.
+     *
+     * @param array<string,mixed>               $schema
+     * @param array<string,array<string,mixed>> $ui
+     *
+     * @return array<string,mixed>
+     *
+     * @throws \InvalidArgumentException when the configuration names an entity or field the
+     *                                   schema does not have
+     */
+    private static function applyUi(array $schema, array $ui): array
+    {
+        foreach ($ui as $entity => $stated) {
+            if (!isset($schema[$entity]) || !is_array($schema[$entity])) {
+                throw new \InvalidArgumentException(sprintf(
+                    'The option "ui" configures entity "%s", which this schema does not have. Known are: %s.',
+                    $entity,
+                    implode(', ', self::entityNamesOf($schema))
+                ));
+            }
+
+            $properties = $schema[$entity]['properties'] ?? array();
+            $properties = is_array($properties) ? $properties : array();
+
+            if (array_key_exists('label', $stated)) {
+                /*
+                 * THE ENTITY LABEL GOES UNDER THE SAME NAMESPACED KEY, one level up. A bare
+                 * `settings['label']` was free — the core's apidoc promises one and the code
+                 * writes `labelProperty` instead (Schema-Vertrag 1.2) — but taking a name the
+                 * core advertises would hand the next core version a collision. Its reader is
+                 * `MenuBuilder` and the two headings (005-005-0004).
+                 */
+                $settings = $schema[$entity]['settings'] ?? array();
+                $settings = is_array($settings) ? $settings : array();
+                $carried  = $settings[ShapingListener::SCHEMA_KEY] ?? array();
+
+                $settings[ShapingListener::SCHEMA_KEY] = array_merge(
+                    is_array($carried) ? $carried : array(),
+                    array('label' => $stated['label'])
+                );
+
+                $schema[$entity]['settings'] = $settings;
+            }
+
+            if (array_key_exists('list', $stated)) {
+                foreach ($stated['list'] as $field) {
+                    self::assertField($properties, $entity, $field, 'list');
+                }
+
+                /*
+                 * EVERY FIELD IS STATED, NOT ONLY THE CHOSEN ONES. One `showInList: true` on an
+                 * entity switches the automatic column fill off (ADR 0017 §1), so the chosen
+                 * fields alone would already select — but a field that stage 2 marked
+                 * `showInList: true` would stay a column, and stage 3 is supposed to win. So the
+                 * others are stated `false` rather than left open.
+                 *
+                 * `position` carries the order, which is what makes `ColumnBuilder` show it
+                 * without a change. It orders form fields within their tab as well (ADR 0017
+                 * §2) — a side effect on an entity that states `list` but no `tabs`; where
+                 * `tabs` is stated, 005-005-0005 decides the order.
+                 */
+                $rank = array_flip(array_values($stated['list']));
+
+                foreach (array_keys($properties) as $field) {
+                    $properties[$field] = self::stateShaping(
+                        $properties[$field],
+                        isset($rank[$field])
+                            ? array('showInList' => true, 'position' => $rank[$field] + 1)
+                            : array('showInList' => false)
+                    );
+                }
+            }
+
+            if (array_key_exists('tabs', $stated)) {
+                foreach ($stated['tabs'] as $tab => $fields) {
+                    foreach ($fields as $field) {
+                        self::assertField($properties, $entity, $field, sprintf('tabs.%s', $tab));
+
+                        $properties[$field] = self::stateShaping($properties[$field], array('tab' => $tab));
+                    }
+                }
+            }
+
+            if (array_key_exists('widgets', $stated)) {
+                foreach (array_keys($stated['widgets']) as $field) {
+                    self::assertField($properties, $entity, (string) $field, 'widgets');
+                }
+            }
+
+            $schema[$entity]['properties'] = $properties;
+        }
+
+        return $schema;
+    }
+
+    /**
+     * Writes stage-3 values into one field's shaping key, beating what is already there.
+     *
+     * The carried value is stage 2's, put there by `ShapingListener` — and stage 3 goes in front
+     * of it (ADR 0031). Only the keys stage 3 actually states are touched; everything else the
+     * entity said about this field survives untouched, because the precedence is per value and
+     * not per entity.
+     *
+     * @param array<string,mixed>|mixed      $meta
+     * @param array<string,string|int|bool>  $stated
+     *
+     * @return array<string,mixed>
+     */
+    private static function stateShaping($meta, array $stated): array
+    {
+        $meta    = is_array($meta) ? $meta : array();
+        $carried = $meta[ShapingListener::SCHEMA_KEY] ?? array();
+
+        $meta[ShapingListener::SCHEMA_KEY] = array_merge(is_array($carried) ? $carried : array(), $stated);
+
+        return $meta;
+    }
+
+    /**
+     * @param array<string,mixed> $properties
+     *
+     * @throws \InvalidArgumentException when the entity has no such field
+     */
+    private static function assertField(array $properties, string $entity, string $field, string $setting): void
+    {
+        if (array_key_exists($field, $properties)) {
+            return;
+        }
+
+        throw new \InvalidArgumentException(sprintf(
+            'The setting "%s" of entity "%s" in the option "ui" names field "%s", which that entity does not have. Known are: %s.',
+            $setting,
+            $entity,
+            $field,
+            implode(', ', array_keys($properties))
+        ));
+    }
+
+    /**
+     * @param array<string,mixed> $schema
+     *
+     * @return list<string>
+     */
+    private static function entityNamesOf(array $schema): array
+    {
+        $names = array_filter(array_keys($schema), static function ($name): bool {
+            return !str_starts_with((string) $name, '_');
+        });
+
+        return array_values(array_map('strval', $names));
     }
 
     /**
