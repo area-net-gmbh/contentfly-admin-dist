@@ -19,7 +19,6 @@ use Areanet\ContentflyAdmin\View\WidgetRegistry;
 use Areanet\ContentflyAdmin\View\WidgetResolver;
 use Areanet\PIM\Classes\Api;
 use Areanet\PIM\Classes\Exceptions\ContentflyException;
-use Areanet\PIM\Classes\Language;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -266,7 +265,7 @@ final class FormController
         $schema = $this->app[SchemaClient::CONTAINER_KEY]->getSchema();
 
         $isTranslatable = !empty($schema[$name]['settings']['i18n']);
-        $language       = $isTranslatable ? self::language($request) : null;
+        $language       = $isTranslatable ? self::editingLanguage($request->query->get('lang')) : null;
 
         if ($isTranslatable && $language === null) {
             return self::refusal(
@@ -883,28 +882,6 @@ final class FormController
         }
 
         return $values;
-    }
-
-    /**
-     * The language a translatable record is edited in.
-     *
-     * The same reasoning as `ListController::language()`: `Language::fromRequest()` reads `lang`
-     * from the request *body* and answers `null` for a page navigated to with GET, so the query
-     * parameter is read instead and an absent one falls back to the first configured language.
-     * A language *switch* in the form is not part of this task — it needs the save path to carry
-     * the language, which is story 002-006-0004.
-     */
-    private static function language(Request $request): ?string
-    {
-        $requested = Language::normalise($request->query->get('lang'));
-
-        if ($requested !== null && Language::isConfigured($requested)) {
-            return $requested;
-        }
-
-        $configured = Language::configured();
-
-        return $configured[0] ?? null;
     }
 
     /**

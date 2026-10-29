@@ -100,6 +100,22 @@ abstract class AbstractRowAction
             if (!$permission->isGranted($this->app[PermissionView::CONTAINER_KEY])) {
                 return self::accessDeniedBare();
             }
+
+            /*
+             * A WRITING ACTION ALSO NEEDS THE LANGUAGE. `PagePermission` deliberately knows
+             * nothing about languages — a *page* has no concept of one, and its docblock says so.
+             * An action is different: it writes, and on a translatable entity the entity right is
+             * only half the question (ADR 0019 §5). The language is the one the list was showing,
+             * carried into this post in its hidden `query` field, because that is the context the
+             * editor acted in — the same assumption the form makes about its own language.
+             *
+             * ONLY FOR `write` AND `delete`. A `read` action does not write, and asking the write
+             * question about it would refuse an action that only looks at something.
+             */
+            if ($permission->action !== PagePermission::READ
+                && !$this->mayEditLanguage($permission->entity, self::carriedLanguage($request))) {
+                return self::accessDeniedBare();
+            }
         }
 
         $this->request = $request;

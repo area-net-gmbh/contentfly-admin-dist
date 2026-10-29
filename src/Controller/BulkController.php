@@ -6,6 +6,7 @@ namespace Areanet\ContentflyAdmin\Controller;
 
 use Areanet\ContentflyAdmin\AdminManager;
 use Areanet\ContentflyAdmin\Auth\FormToken;
+use Areanet\ContentflyAdmin\Schema\SchemaClient;
 use Areanet\ContentflyAdmin\View\EntityView;
 use Areanet\ContentflyAdmin\View\MenuBuilder;
 use Symfony\Component\HttpFoundation\Request;
@@ -226,6 +227,28 @@ final class BulkController
      */
     private function change(Request $request, string $name, array $ids): array
     {
+        /*
+         * THE LANGUAGE IS DECIDED, CHECKED AND SENT — all three, because leaving it out does not
+         * mean "any language", it means the call cannot work. Measured against the running core:
+         * `/api/multiupdate` without `lang` on a translatable entity answers
+         * `contentfly_i18n_missing_lang_param` from `Api.php:588`, for EVERY editor, an
+         * administrator included — the parameter is refused before the language permission is
+         * ever consulted. A bulk change on a translatable entity was therefore not merely
+         * unchecked, it was impossible.
+         *
+         * So the permission question and the write use the SAME language. Checking one and
+         * writing another is the failure mode ADR 0019 is organised against, and here it would
+         * have been unavoidable: there was no language to check.
+         */
+        $schema   = $this->app[SchemaClient::CONTAINER_KEY]->getSchema();
+        $language = empty($schema[$name]['settings']['i18n'])
+            ? null
+            : self::carriedLanguage($request);
+
+        if (!$this->mayEditLanguage($name, $language)) {
+            return array('bulk' => 'forbidden');
+        }
+
         $field = $request->request->get('field');
         $fields = $this->app[EntityView::CONTAINER_KEY]->changeableFields($name);
         $chosen = null;
@@ -258,7 +281,13 @@ final class BulkController
             );
         }
 
-        $envelope = $this->callCore($request, '/api/multiupdate', array('objects' => $objects));
+        $payload = array('objects' => $objects);
+
+        if ($language !== null) {
+            $payload['lang'] = $language;
+        }
+
+        $envelope = $this->callCore($request, '/api/multiupdate', $payload);
 
         if (!$envelope['ok']) {
             return self::report(self::CHANGE, 0, $ids, self::code($envelope));

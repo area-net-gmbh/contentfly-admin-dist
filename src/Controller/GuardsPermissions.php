@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Areanet\ContentflyAdmin\Controller;
 
 use Areanet\ContentflyAdmin\Auth\PermissionView;
+use Areanet\PIM\Classes\Language;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -76,6 +78,54 @@ trait GuardsPermissions
     private function mayEditLanguage(string $entity, ?string $language): bool
     {
         return $this->app[PermissionView::CONTAINER_KEY]->mayEditLanguage($entity, $language);
+    }
+
+    /**
+     * The language a translatable entity is being worked in, out of a candidate value.
+     *
+     * ONE FALLBACK RULE, SEVERAL SOURCES — which is why this takes a value and not a request.
+     * The list and the form read `lang` from the *query*, because a page navigated to with GET
+     * has no body; an action posted from a list reads it from the query that list carried along
+     * in a hidden field. The source differs per route and the rule must not: an absent or
+     * unconfigured value falls back to the first configured language, because a zero-
+     * configuration admin has to work on *something* before anyone picks a language, and a
+     * mistyped language in a URL is not worth an error page.
+     *
+     * `Language::fromRequest()` IS NOT THIS. It reads `lang` from the request body and refuses an
+     * unconfigured value with a 400 — right for an API call that states its language, wrong for
+     * a page whose language is part of where the editor happens to be.
+     *
+     * IT MATTERS THAT THIS IS ONE METHOD. A permission check that disagrees with the write it
+     * guards is the failure mode ADR 0019 is organised against: the check would pass for one
+     * language and the write land in another.
+     */
+    private static function editingLanguage(mixed $requested): ?string
+    {
+        $language = Language::normalise($requested);
+
+        if ($language !== null && Language::isConfigured($language)) {
+            return $language;
+        }
+
+        $configured = Language::configured();
+
+        return $configured[0] ?? null;
+    }
+
+    /**
+     * The language out of the query a list carried into this post.
+     *
+     * The bulk bar and every row-action button post the list's own query string in a hidden
+     * `query` field (`templates/list.html.twig:170`), which is how a report finds its way back
+     * to the list the editor came from. That field is also the only place the language of that
+     * list survives the post — the action's own address carries none.
+     */
+    private static function carriedLanguage(Request $request): ?string
+    {
+        $carried = array();
+        parse_str((string) $request->request->get('query', ''), $carried);
+
+        return self::editingLanguage($carried['lang'] ?? null);
     }
 
     /**

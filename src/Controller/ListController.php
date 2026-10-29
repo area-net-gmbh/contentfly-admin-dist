@@ -115,7 +115,7 @@ final class ListController
         $schema = $this->app[SchemaClient::CONTAINER_KEY]->getSchema();
 
         $isTranslatable = !empty($schema[$name]['settings']['i18n']);
-        $language       = $isTranslatable ? self::language($request) : null;
+        $language       = $isTranslatable ? self::editingLanguage($request->query->get('lang')) : null;
 
         if ($isTranslatable && $language === null) {
             return self::refusal(
@@ -297,33 +297,6 @@ final class ListController
         }
 
         return $response;
-    }
-
-    /**
-     * The language a translatable entity is listed in.
-     *
-     * `Language::fromRequest()` CANNOT BE USED HERE. It reads `lang` from the request *body*,
-     * which a listing page navigated to with GET does not have, so it would answer `null` for
-     * every list and `Api::getList()` throws on an empty language for an i18n entity. The query
-     * parameter is read instead, and an absent one falls back to the first configured language
-     * — a zero-configuration admin has to show *something* before anyone picks a language. A
-     * real language switch belongs with the form view, which is where editing a translation
-     * happens.
-     *
-     * An unknown or unconfigured value falls back rather than failing: it reaches this method
-     * from a URL, and a mistyped language is not worth an error page.
-     */
-    private static function language(Request $request): ?string
-    {
-        $requested = Language::normalise($request->query->get('lang'));
-
-        if ($requested !== null && Language::isConfigured($requested)) {
-            return $requested;
-        }
-
-        $configured = Language::configured();
-
-        return $configured[0] ?? null;
     }
 
     /**

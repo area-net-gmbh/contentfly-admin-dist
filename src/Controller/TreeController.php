@@ -257,6 +257,17 @@ final class TreeController
             return self::back($base, array('done' => 'forbidden'));
         }
 
+        /*
+         * AND THE LANGUAGE, WHERE THE ENTITY HAS ONE. A tree entity may be translatable, and then
+         * the entity right is only half the question (ADR 0019 §5). The language comes from the
+         * query the page carried into this post, the same source the bulk bar uses — the action's
+         * own address carries none. For an entity without `settings.i18n` this is always true,
+         * so it costs a non-translatable tree nothing.
+         */
+        if (!$this->mayEditLanguage($name, self::carriedLanguage($request))) {
+            return self::back($base, array('done' => 'forbidden'));
+        }
+
         $before = self::findInTree($this->treeRows($request, $name), $id);
 
         if ($before === null) {
@@ -343,6 +354,11 @@ final class TreeController
          * secures nothing — this is the half that closes the data (ADR 0019, ADR 0026 §5).
          */
         if (!$this->mayWrite($name)) {
+            return self::moveAnswer($request, $base, 'forbidden');
+        }
+
+        /* The language half of the same question — see the delete path above. */
+        if (!$this->mayEditLanguage($name, self::carriedLanguage($request))) {
             return self::moveAnswer($request, $base, 'forbidden');
         }
 
