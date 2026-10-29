@@ -79,6 +79,27 @@ final class OptionsController
             return new JsonResponse(array(), 404);
         }
 
+        /*
+         * THE TARGET'S READ RIGHT IS A SECOND QUESTION. `mayRead($name)` above asks whether the
+         * editor may open *this* form; the options come from another entity, and the right on it
+         * is decided there. The core asks the same question — `Api::getList()` calls
+         * `Permission::isReadable()` for the target, which is why `RelationOptions` goes through
+         * it in-process and not over a query of its own — but it answers a refusal as "no
+         * options", and on this route that is indistinguishable from "nothing matched". So the
+         * gate is stated here rather than inferred from an empty list, and it answers the 403
+         * ADR 0019 §6 asks a fragment route for. The core's check stays where it is: this one is
+         * in front of it, not instead of it.
+         *
+         * IT IS ASKED BEFORE THE TERM IS READ, so a forbidden target refuses whatever the query
+         * says. The entity comes from the schema by way of `RelationOptions::targetEntity()`,
+         * never from the request, and `null` means the field names no target to refuse.
+         */
+        $target = $this->app[RelationOptions::CONTAINER_KEY]->targetEntity($widget);
+
+        if ($target !== null && !$this->mayRead($target)) {
+            return self::accessDeniedBare();
+        }
+
         $query = trim((string) $request->query->get('q', ''));
 
         if ($query === '') {

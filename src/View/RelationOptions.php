@@ -119,6 +119,26 @@ final class RelationOptions
     }
 
     /**
+     * The target entity of one relation field, or `null` when the field names none.
+     *
+     * The caller is the permission gate of the search route. A relation offers the records of
+     * *another* entity, so the read right on that entity is a question about it and not about
+     * the form the field sits on. It goes through `describe()` for the same reason `describe()`
+     * exists: the gate and the query must not disagree about which entity a field points at.
+     *
+     * `null` covers a field that names no target and a target the schema does not carry. Both
+     * end in `search()` answering `null`, so there is nothing to refuse access to.
+     *
+     * @param array<string,mixed> $widget The widget definition from `WidgetResolver`
+     */
+    public function targetEntity(array $widget): ?string
+    {
+        $prepared = $this->describe($widget);
+
+        return $prepared === null ? null : $prepared[0];
+    }
+
+    /**
      * Entity name, label property and base filter of one relation field, or `null`.
      *
      * The part `forField()` and `search()` have in common, kept in one place because the two

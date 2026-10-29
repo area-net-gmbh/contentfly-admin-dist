@@ -108,6 +108,18 @@ export default class extends Controller {
                 headers: { Accept: 'application/json' },
             });
 
+            /*
+             * A REFUSAL IS NOT AN OUTAGE. The route answers 403 with an empty body when the
+             * editor may not read the entity the relation points at (ADR 0019 §6). Reporting
+             * that as "not reachable" would send someone looking for a broken server, and the
+             * box would keep inviting a term that can never match anything. This is the one
+             * status that means "there is nothing here you may choose".
+             */
+            if (response.status === 403) {
+                this.results.replaceChildren(this.message('Dafür fehlt dir die Berechtigung.'));
+                return;
+            }
+
             if (!response.ok) {
                 this.results.replaceChildren(this.message('Die Suche ist gerade nicht erreichbar.'));
                 return;
