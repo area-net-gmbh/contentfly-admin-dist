@@ -33,7 +33,9 @@ use Areanet\ContentflyAdmin\View\WidgetRegistry;
 use Areanet\ContentflyAdmin\View\WidgetResolver;
 use Areanet\PIM\Classes\Kernel\ApplicationInterface;
 use Symfony\Component\HttpFoundation\RedirectResponse;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 /**
  * The admin package's entry point into a Contentfly project.
@@ -79,6 +81,7 @@ final class AdminManager
         'thumbnailAlias' => 'pim_list',
         'thumbnailAliases' => [],
         'uploadAccept'   => '',
+        'log'            => '',
         'pages'          => null,
         'rowActions'     => null,
         'widgets'        => null,
@@ -135,6 +138,9 @@ final class AdminManager
     /** `accept` value the upload offers the browser; empty means no pre-check at all. */
     private string $uploadAccept;
 
+    /** Where failed core calls are appended, or `''` when logging is off. */
+    private string $log;
+
     /** What a project registers its own admin pages in, or `null` when it registers none. */
     private ?\Closure $pages;
 
@@ -179,6 +185,7 @@ final class AdminManager
         $this->thumbnailAlias   = self::validateThumbnailAlias($options['thumbnailAlias']);
         $this->thumbnailAliases = self::validateThumbnailAliases($options['thumbnailAliases']);
         $this->uploadAccept     = self::validateUploadAccept($options['uploadAccept']);
+        $this->log              = self::validateLog($options['log']);
         $this->pages            = self::validatePages($options['pages']);
         $this->rowActions       = self::validateRowActions($options['rowActions']);
         $this->widgets          = self::validateWidgets($options['widgets']);
@@ -191,6 +198,7 @@ final class AdminManager
         $this->mountRoutes();
         $this->registerAuthBridge();
         $this->registerLoginRedirect();
+        $this->registerFailureHandler();
         $this->registerCommands();
         $this->registerSchemaListener();
     }
@@ -269,6 +277,12 @@ final class AdminManager
 
         $this->app[VersionGuard::CONTAINER_KEY] = static function (): VersionGuard {
             return new VersionGuard();
+        };
+
+        $log = $this->log;
+
+        $this->app[CoreLog::CONTAINER_KEY] = static function () use ($log): CoreLog {
+            return new CoreLog($log);
         };
 
         $this->app[PermissionView::CONTAINER_KEY] = static function ($app): PermissionView {
@@ -454,6 +468,69 @@ final class AdminManager
 
             return $response;
         }, 0);
+    }
+
+    /**
+     * The last word on an admin route: anything nobody wrote a branch for becomes a named answer.
+     *
+     * WHY A KERNEL HANDLER AND NOT A CATCH AT EVERY READ. Story 007-001-0001 tried the other way
+     * and measured why it cannot work: taking the database away from the harness produced the
+     * core's debug page with a full stack trace and **no frame of this package in it at all**.
+     * The core authenticates in `RouteSecurityListener` on `kernel.request`, and `TokenHandler`
+     * reaches the database there — before any controller of ours runs, so before `guard()` and
+     * long before any `getList()`. A `try` around a read can only catch what a read reaches.
+     *
+     * IT SITS BELOW `registerLoginRedirect()` ON PURPOSE. That handler runs at priority 0 and
+     * answers the one case it recognises; this one runs after it and before the core's own
+     * (`-8`), so an access refusal still becomes the login mask and everything else lands here.
+     *
+     * AN `HttpExceptionInterface` IS LEFT ALONE. A 404 from a hand-edited URL and a 403 from a
+     * missing right are *deliberate* answers somebody wrote; dressing them up as "the core
+     * failed" would make a working refusal look like an outage.
+     *
+     * A FRAGMENT GETS THE STATUS AND NO BODY, the same reasoning
+     * `GuardsPermissions::accessDeniedBare()` records: its callers are read by JavaScript or
+     * followed by a redirect, so an HTML page would be parsed as data or thrown away.
+     *
+     * NO TWIG, EVER, HERE. The layout reads the schema through `MenuBuilder`, and what reaches
+     * this handler may well *be* the schema failing — rendering the report through the stack
+     * that just broke is how a handler fails a second time while describing the first.
+     */
+    private function registerFailureHandler(): void
+    {
+        $app    = $this->app;
+        $prefix = $this->prefix;
+
+        $this->app->error(static function (\Throwable $error, $request) use ($app, $prefix) {
+            if ($error instanceof HttpExceptionInterface) {
+                return null;
+            }
+
+            $path = $request->getPathInfo();
+
+            if ($path !== $prefix && !str_starts_with($path, $prefix.'/')) {
+                return null;
+            }
+
+            $app[CoreLog::CONTAINER_KEY]->unexpected($path, $error);
+
+            if ($request->request->get('_format') === 'json' || $request->isXmlHttpRequest()) {
+                return new Response('', 500);
+            }
+
+            $heading = 'Contentfly Admin konnte die Seite nicht laden';
+            $message = 'Der Vorgang ist an einer Stelle gescheitert, die nicht vorgesehen war. '
+                .'Es wurde nichts gespeichert. Melde dich bei einer Administratorin oder einem '
+                .'Administrator — der technische Grund steht im Server-Log.';
+
+            $html = '<!doctype html>'
+                .'<html lang="de"><head><meta charset="utf-8">'
+                .'<title>'.htmlspecialchars($heading, ENT_QUOTES, 'UTF-8').'</title></head>'
+                .'<body><h1>'.htmlspecialchars($heading, ENT_QUOTES, 'UTF-8').'</h1>'
+                .'<p>'.htmlspecialchars($message, ENT_QUOTES, 'UTF-8').'</p></body></html>';
+
+            return new Response($html, 500, array('Content-Type' => 'text/html; charset=UTF-8'));
+        }, -1);
     }
 
     /**
@@ -1295,6 +1372,51 @@ final class AdminManager
     public function getUploadAccept(): string
     {
         return $this->uploadAccept;
+    }
+
+    /** Where `CoreLog` appends, or `''` when the project did not ask for a log. */
+    public function getLog(): string
+    {
+        return $this->log;
+    }
+
+    /**
+     * OFF UNLESS ASKED FOR, and a path rather than a flag.
+     *
+     * A boolean would have to invent a location, and every invented location is wrong for
+     * somebody — a package that installs with no configuration has no business deciding where a
+     * project writes files. Naming the path makes the project say it, and an empty value is the
+     * honest default: no file, no writes, no directory created behind anyone's back.
+     *
+     * THE DIRECTORY MUST EXIST. It is not created here: a package that creates directories
+     * outside its own tree is a package that surprises its host, and a typo would silently grow
+     * one rather than being reported.
+     *
+     * @param mixed $log
+     */
+    private static function validateLog($log): string
+    {
+        if (!is_string($log)) {
+            throw new \InvalidArgumentException('The option "log" must be a string path, for example "data/logs/admin.log". Empty means no logging.');
+        }
+
+        $log = trim($log);
+
+        if ($log === '') {
+            return '';
+        }
+
+        $directory = \dirname($log);
+
+        if (!is_dir($directory)) {
+            throw new \InvalidArgumentException(sprintf(
+                'The option "log" points at "%s", but the directory "%s" does not exist. Create it, or leave the option empty to switch logging off.',
+                $log,
+                $directory
+            ));
+        }
+
+        return $log;
     }
 
     /**

@@ -20,7 +20,6 @@ use Areanet\ContentflyAdmin\View\WidgetResolver;
 use Areanet\PIM\Classes\Api;
 use Areanet\PIM\Classes\Exceptions\ContentflyException;
 use Areanet\PIM\Classes\Language;
-use Symfony\Component\HttpKernel\HttpKernelInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -59,6 +58,7 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class FormController
 {
+    use CallsCore;
     use GuardsCoreVersion;
     use GuardsPermissions;
     use ResolvesTree;
@@ -495,17 +495,7 @@ final class FormController
             $payload['lang'] = $language;
         }
 
-        $sub = Request::create(
-            $id === null ? '/api/insert' : '/api/update',
-            'POST',
-            $payload,
-            array(),
-            array(),
-            $request->server->all()
-        );
-
-        $response = $this->app->handle($sub, HttpKernelInterface::SUB_REQUEST);
-        $envelope = Envelope::read($response->getContent(), $response->getStatusCode());
+        $envelope = $this->callCore($request, $id === null ? '/api/insert' : '/api/update', $payload);
 
         if (!$envelope['ok']) {
             return $this->reject($request, $name, $id, $fields, $prepared, $envelope, $language);

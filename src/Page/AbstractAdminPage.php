@@ -9,15 +9,14 @@ use Areanet\ContentflyAdmin\Asset\Importmap;
 use Areanet\ContentflyAdmin\Attribute\AdminAction;
 use Areanet\ContentflyAdmin\Attribute\AdminPage;
 use Areanet\ContentflyAdmin\Auth\PermissionView;
+use Areanet\ContentflyAdmin\Controller\CallsCore;
 use Areanet\ContentflyAdmin\Controller\GuardsCoreVersion;
 use Areanet\ContentflyAdmin\Controller\GuardsPermissions;
-use Areanet\ContentflyAdmin\Schema\Envelope;
 use Areanet\ContentflyAdmin\View\MenuBuilder;
 use Areanet\ContentflyAdmin\View\TemplateRenderer;
 use Areanet\PIM\Classes\Api;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\HttpKernel\HttpKernelInterface;
 
 /**
  * The base class of every project page — the whole of stage 3a a project has to know about.
@@ -50,6 +49,7 @@ use Symfony\Component\HttpKernel\HttpKernelInterface;
  */
 abstract class AbstractAdminPage
 {
+    use CallsCore;
     use GuardsCoreVersion;
     use GuardsPermissions;
 
@@ -165,10 +165,7 @@ abstract class AbstractAdminPage
      */
     protected function write(string $endpoint, array $payload): array
     {
-        $sub      = Request::create($endpoint, 'POST', $payload, array(), array(), $this->request->server->all());
-        $response = $this->app->handle($sub, HttpKernelInterface::SUB_REQUEST);
-
-        return Envelope::read($response->getContent(), $response->getStatusCode());
+        return $this->callCore($this->request, $endpoint, $payload);
     }
 
     /**

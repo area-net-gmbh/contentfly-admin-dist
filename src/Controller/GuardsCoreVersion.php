@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Areanet\ContentflyAdmin\Controller;
 
+use Areanet\ContentflyAdmin\CoreLog;
 use Areanet\ContentflyAdmin\Schema\CoreVersionMismatch;
 use Areanet\ContentflyAdmin\Schema\SchemaClient;
 use Areanet\ContentflyAdmin\Schema\VersionGuard;
@@ -45,6 +46,8 @@ trait GuardsCoreVersion
         try {
             $this->app[VersionGuard::CONTAINER_KEY]->check();
         } catch (CoreVersionMismatch $mismatch) {
+            $this->app[CoreLog::CONTAINER_KEY]->unexpected('version-guard', $mismatch);
+
             return self::refusal('Contentfly Admin cannot start', $mismatch->getMessage());
         }
 
@@ -67,6 +70,8 @@ trait GuardsCoreVersion
         try {
             $this->app[SchemaClient::CONTAINER_KEY]->getSchema();
         } catch (\InvalidArgumentException $misconfigured) {
+            $this->app[CoreLog::CONTAINER_KEY]->unexpected('admin-configuration', $misconfigured);
+
             return self::refusal('Contentfly Admin is misconfigured', $misconfigured->getMessage());
         } catch (\Throwable $unreachable) {
             /*
@@ -86,6 +91,8 @@ trait GuardsCoreVersion
              * driver's own text, and a driver exception carries the DSN — host, user, database.
              * The detail belongs in the log, which is 007-001-0002.
              */
+            $this->app[CoreLog::CONTAINER_KEY]->unexpected('schema-read', $unreachable);
+
             return self::refusal(
                 'Contentfly Admin cannot read the schema',
                 'The core failed while answering its schema, and the admin cannot render '

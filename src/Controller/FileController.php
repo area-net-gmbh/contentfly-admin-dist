@@ -16,7 +16,6 @@ use Areanet\PIM\Classes\Exceptions\ContentflyException;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\HttpKernel\HttpKernelInterface;
 
 /**
  * The file manager: folders, files, preview, and the three write paths.
@@ -44,6 +43,7 @@ use Symfony\Component\HttpKernel\HttpKernelInterface;
  */
 final class FileController
 {
+    use CallsCore;
     use GuardsCoreVersion;
     use GuardsPermissions;
     use ResolvesFiles;
@@ -467,7 +467,7 @@ final class FileController
          * through the API sees `''` for "cleared", never NULL. Only the three fields of this form
          * are sent, so `description` keeps whatever it had (ADR 0022).
          */
-        $envelope = $this->call($request, '/api/update', array(
+        $envelope = $this->callCore($request, '/api/update', array(
             'entity' => self::ENTITY_FILE,
             'id'     => $id,
             'data'   => $values,
@@ -728,7 +728,7 @@ final class FileController
                 return self::answer($request, $base, $from, array('done' => 'forbidden'));
             }
 
-            $envelope = $this->call($request, '/api/delete', array(
+            $envelope = $this->callCore($request, '/api/delete', array(
                 'entity' => self::ENTITY_FILE,
                 'id'     => $id,
             ));
@@ -760,7 +760,7 @@ final class FileController
                 $data = array('folder' => is_string($target) && $target !== '' ? $target : null);
             }
 
-            $envelope = $this->call($request, '/api/update', array(
+            $envelope = $this->callCore($request, '/api/update', array(
                 'entity' => self::ENTITY_FILE,
                 'id'     => $id,
                 'data'   => $data,
@@ -802,7 +802,7 @@ final class FileController
         }
 
         $status   = null;
-        $envelope = $this->call(
+        $envelope = $this->callCore(
             $request,
             self::CORE_UPLOAD_ROUTE,
             $folder === null ? array() : array(self::PARAM_FOLDER => $folder),
@@ -856,33 +856,6 @@ final class FileController
     private static function wantsJson(Request $request): bool
     {
         return ($request->request->all()[self::FORMAT_FIELD] ?? null) === self::FORMAT_JSON;
-    }
-
-    /**
-     * One sub-request to the core, with its answer read as an envelope (ADR 0014).
-     *
-     * THE PAYLOAD GOES IN THE REQUEST BAG and the server parameters are carried over, so the
-     * guarded main request's `auth.user` is the one the core checks its own per-record permission
-     * against — the same shape the form and the bulk actions use.
-     *
-     * FILES TRAVEL IN THE FIFTH ARGUMENT, and the instance has to be the main request's own — see
-     * `upload()` for why rebuilding one fails without saying so.
-     *
-     * @param array<string,mixed>        $payload
-     * @param array<string,UploadedFile> $files
-     * @param int|null                   $status Filled with the core's HTTP status, for the one
-     *                                          caller that needs it when there is no envelope
-     *
-     * @return array{ok: bool, readable: bool, data: mixed, error: array<string,mixed>|null}
-     */
-    private function call(Request $request, string $endpoint, array $payload, array $files = array(), ?int &$status = null): array
-    {
-        $sub = Request::create($endpoint, 'POST', $payload, array(), $files, $request->server->all());
-
-        $response = $this->app->handle($sub, HttpKernelInterface::SUB_REQUEST);
-        $status   = $response->getStatusCode();
-
-        return Envelope::read($response->getContent(), $status);
     }
 
     /**

@@ -6,12 +6,10 @@ namespace Areanet\ContentflyAdmin\Controller;
 
 use Areanet\ContentflyAdmin\AdminManager;
 use Areanet\ContentflyAdmin\Auth\FormToken;
-use Areanet\ContentflyAdmin\Schema\Envelope;
 use Areanet\ContentflyAdmin\View\EntityView;
 use Areanet\ContentflyAdmin\View\MenuBuilder;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\HttpKernel\HttpKernelInterface;
 
 /**
  * The two actions a selection of records can be put through (002-004-0005).
@@ -44,6 +42,7 @@ use Symfony\Component\HttpKernel\HttpKernelInterface;
  */
 final class BulkController
 {
+    use CallsCore;
     use GuardsCoreVersion;
     use GuardsPermissions;
 
@@ -194,7 +193,7 @@ final class BulkController
         $code   = null;
 
         foreach ($ids as $id) {
-            $envelope = $this->call($request, '/api/delete', array('entity' => $name, 'id' => $id));
+            $envelope = $this->callCore($request, '/api/delete', array('entity' => $name, 'id' => $id));
 
             if ($envelope['ok']) {
                 $done++;
@@ -259,7 +258,7 @@ final class BulkController
             );
         }
 
-        $envelope = $this->call($request, '/api/multiupdate', array('objects' => $objects));
+        $envelope = $this->callCore($request, '/api/multiupdate', array('objects' => $objects));
 
         if (!$envelope['ok']) {
             return self::report(self::CHANGE, 0, $ids, self::code($envelope));
@@ -289,27 +288,6 @@ final class BulkController
         }
 
         return $value === 'true';
-    }
-
-    /**
-     * One sub-request to the core, with its answer read as an envelope.
-     *
-     * THE PAYLOAD GOES IN THE REQUEST BAG, not as a JSON body — the core reads every one of these
-     * endpoints out of `$request->request`, and ADR 0014 records that this is what makes the
-     * sub-request work at all. The server parameters are carried over so the guarded main
-     * request's `auth.user` is the one the core checks permissions against.
-     *
-     * @param array<string,mixed> $payload
-     *
-     * @return array{ok: bool, readable: bool, data: mixed, error: array<string,mixed>|null}
-     */
-    private function call(Request $request, string $endpoint, array $payload): array
-    {
-        $sub = Request::create($endpoint, 'POST', $payload, array(), array(), $request->server->all());
-
-        $response = $this->app->handle($sub, HttpKernelInterface::SUB_REQUEST);
-
-        return Envelope::read($response->getContent(), $response->getStatusCode());
     }
 
     /**

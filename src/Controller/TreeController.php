@@ -7,14 +7,12 @@ namespace Areanet\ContentflyAdmin\Controller;
 use Areanet\ContentflyAdmin\AdminManager;
 use Areanet\ContentflyAdmin\Asset\Importmap;
 use Areanet\ContentflyAdmin\Auth\FormToken;
-use Areanet\ContentflyAdmin\Schema\Envelope;
 use Areanet\ContentflyAdmin\Schema\SchemaClient;
 use Areanet\ContentflyAdmin\View\EntityView;
 use Areanet\ContentflyAdmin\View\MenuBuilder;
 use Areanet\ContentflyAdmin\View\TemplateRenderer;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\HttpKernel\HttpKernelInterface;
 
 /**
  * The records of one `BaseTree` entity, as a tree.
@@ -40,6 +38,7 @@ use Symfony\Component\HttpKernel\HttpKernelInterface;
  */
 final class TreeController
 {
+    use CallsCore;
     use GuardsCoreVersion;
     use GuardsPermissions;
     use ResolvesTree;
@@ -265,7 +264,7 @@ final class TreeController
         }
 
         $ids      = self::subtreeIds($before);
-        $envelope = $this->call($request, '/api/delete', array('entity' => $name, 'id' => $id));
+        $envelope = $this->callCore($request, '/api/delete', array('entity' => $name, 'id' => $id));
 
         /*
          * COUNTED AGAIN AFTER THE WRITE, whatever the core answered. On success this confirms the
@@ -407,7 +406,7 @@ final class TreeController
             $objects[] = array('entity' => $name, 'id' => $one, 'data' => $data);
         }
 
-        $envelope = $this->call($request, '/api/multiupdate', array('objects' => $objects));
+        $envelope = $this->callCore($request, '/api/multiupdate', array('objects' => $objects));
 
         /*
          * RE-READ, THEN JUDGE. `$envelope['ok']` says the core committed; it does not say the
@@ -486,26 +485,6 @@ final class TreeController
     private static function wantsJson(Request $request): bool
     {
         return ($request->request->all()[self::FORMAT_FIELD] ?? null) === self::FORMAT_JSON;
-    }
-
-    /**
-     * One sub-request to the core, with its answer read as an envelope (ADR 0014).
-     *
-     * Its own helper rather than a shared one, as in `FileController` and for the reason the dev
-     * guide records: the payload shape is the caller's business, and the server parameters are
-     * carried over so the core checks its per-record permission against the guarded main
-     * request's `auth.user`.
-     *
-     * @param array<string,mixed> $payload
-     *
-     * @return array{ok: bool, readable: bool, data: mixed, error: array<string,mixed>|null}
-     */
-    private function call(Request $request, string $endpoint, array $payload): array
-    {
-        $sub      = Request::create($endpoint, 'POST', $payload, array(), array(), $request->server->all());
-        $response = $this->app->handle($sub, HttpKernelInterface::SUB_REQUEST);
-
-        return Envelope::read($response->getContent(), $response->getStatusCode());
     }
 
     /**
