@@ -398,6 +398,29 @@ final class EntityView
     }
 
     /**
+     * The configured tab order of one entity — tab name to its field names, both in order.
+     *
+     * EMPTY MEANS "NOT STATED", and then the form orders as it always did: the default group
+     * first, then every tab in the order its first field appears in the schema, fields inside a
+     * tab by `position`. The configuration replaces that order; it does not extend it.
+     *
+     * The grouping itself does NOT come from here — that is the per-field `tab` the merge writes,
+     * which `formFields()` already carries. This answers only the question `tab` cannot: in which
+     * sequence (005-005-0005).
+     *
+     * @return array<string,list<string>>
+     */
+    public function tabOrder(string $entity): array
+    {
+        $settings = $this->schemaClient->getSchema()[$entity]['settings'] ?? array();
+        $stated   = is_array($settings)
+            ? ($settings[ShapingListener::SCHEMA_KEY]['tabs'] ?? null)
+            : null;
+
+        return is_array($stated) ? $stated : array();
+    }
+
+    /**
      * Whether one field may be offered as a filter at all — the gates before the type is asked.
      *
      * The order is the order of the reasons: the id is the record's address and already its own

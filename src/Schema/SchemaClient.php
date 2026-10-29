@@ -224,6 +224,29 @@ final class SchemaClient
                         $properties[$field] = self::stateShaping($properties[$field], array('tab' => $tab));
                     }
                 }
+
+                /*
+                 * THE ORDER GOES IN A SECOND TIME, AT ENTITY LEVEL, because the per-field `tab`
+                 * above cannot carry it: it says which group a field belongs to and nothing about
+                 * the sequence of the groups or of the fields inside one.
+                 *
+                 * `position` would have been the obvious vehicle and is the wrong one. It is
+                 * already spoken for by `list`, which writes it for the column order (ADR 0017
+                 * §2 lets it do both) — an entity stating `list` and `tabs` would have the two
+                 * orders overwrite each other, and one of the two would silently lose. A separate
+                 * structure keeps them apart; its reader is `FormController::tabs()`
+                 * (005-005-0005).
+                 */
+                $settings = $schema[$entity]['settings'] ?? array();
+                $settings = is_array($settings) ? $settings : array();
+                $carried  = $settings[ShapingListener::SCHEMA_KEY] ?? array();
+
+                $settings[ShapingListener::SCHEMA_KEY] = array_merge(
+                    is_array($carried) ? $carried : array(),
+                    array('tabs' => $stated['tabs'])
+                );
+
+                $schema[$entity]['settings'] = $settings;
             }
 
             if (array_key_exists('widgets', $stated)) {

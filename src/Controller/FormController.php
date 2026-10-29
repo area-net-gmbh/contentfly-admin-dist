@@ -77,6 +77,43 @@ final class FormController
     private const DEFAULT_TAB = 'Allgemein';
 
     /**
+     * One tab's fields in the stated order; whatever the configuration does not name follows,
+     * keeping the order it arrived in.
+     *
+     * A FIELD IS NEVER DROPPED FOR BEING UNNAMED. That is the whole reason for the second bucket:
+     * an entity gains a field, nobody updates the configuration, and the field has to stay
+     * editable — `array_intersect`-style filtering would have made it disappear from the form
+     * while the record kept the column (005-005-0005).
+     *
+     * @param list<array<string,mixed>> $group
+     * @param list<string>              $stated
+     *
+     * @return list<array<string,mixed>>
+     */
+    private static function byStatedOrder(array $group, array $stated): array
+    {
+        $rank  = array_flip(array_values($stated));
+        $named = array();
+        $rest  = array();
+
+        foreach ($group as $field) {
+            $property = $field['property'] ?? null;
+
+            if (is_string($property) && isset($rank[$property])) {
+                $named[$rank[$property]] = $field;
+
+                continue;
+            }
+
+            $rest[] = $field;
+        }
+
+        ksort($named);
+
+        return array_merge(array_values($named), $rest);
+    }
+
+    /**
      * ADR 0013's sixteen widget keys, and whether this package offers an input for each.
      *
      * TWO FACTS IN ONE PLACE, ON PURPOSE. The key set is what a fragment may be named
@@ -581,7 +618,13 @@ final class FormController
         bool $mayWrite
     ): Response {
         $manager = $this->app[AdminManager::CONTAINER_KEY];
-        $tabs    = self::tabs($fields, $prepared, $values, $fieldErrors);
+        $tabs    = self::tabs(
+            $fields,
+            $prepared,
+            $values,
+            $fieldErrors,
+            $this->app[EntityView::CONTAINER_KEY]->tabOrder($name)
+        );
         $base    = $manager->getPrefix().'/form/'.MenuBuilder::entityToUrl($name);
         $token   = FormToken::issue($request);
 
@@ -883,6 +926,11 @@ final class FormController
      * applied before this method sees them (`EntityView::byPosition()`, ADR 0017); it deliberately
      * does not reach the tab order, so nothing here had to change for it.
      *
+     * SINCE STAGE 3 A PROJECT CAN STATE BOTH ORDERS, and `$tabOrder` then wins over both rules
+     * above — the sequence of the groups and the sequence of the fields inside the groups it
+     * names. The default group keeps its place at the front regardless, because it is where the
+     * fields the configuration forgot end up (005-005-0005).
+     *
      * ONE TAB MEANS NO TABS. An entity that states none, which is every entity until a project
      * writes the attribute, comes out as a single group and the template then renders no bar at
      * all — so this task changes nothing for an unshaped entity.
@@ -890,10 +938,12 @@ final class FormController
      * @param list<array{property: string, label: string, tab: string|null, widget: array<string,mixed>}> $fields
      * @param array<string,mixed>                                                                                 $values
      * @param array<string,string>      $errors Property → message
+     * @param array<string,list<string>> $tabOrder Stated tab order, tab name → field names;
+     *                                             empty when the project states none
      *
      * @return list<array{name: string, index: int, fields: list<array<string,mixed>>}>
      */
-    private static function tabs(array $fields, array $prepared, array $values, array $errors): array
+    private static function tabs(array $fields, array $prepared, array $values, array $errors, array $tabOrder = array()): array
     {
         $grouped = array();
 
@@ -902,15 +952,40 @@ final class FormController
         }
 
         /*
+         * A STATED ORDER REPLACES THE SCHEMA ORDER, inside a tab and between tabs. It arrives as
+         * a whole structure rather than through `position`, because `position` is already the
+         * column order of stage 3's `list` and the two would overwrite each other
+         * (`SchemaClient::applyUi()`, 005-005-0005). Empty means nothing is stated and every line
+         * below then does exactly what it did before.
+         */
+        foreach ($tabOrder as $name => $stated) {
+            if (isset($grouped[$name])) {
+                $grouped[$name] = self::byStatedOrder($grouped[$name], $stated);
+            }
+        }
+
+        /*
          * The default group goes first if it exists at all. Written as a two-step merge rather
          * than a sort, because `+` on arrays keeps the right-hand side's order for every other
          * key — which is the schema order the grouping above produced.
+         *
+         * IT STAYS FIRST EVEN WITH A STATED ORDER, and that is deliberate: it holds exactly the
+         * fields the configuration did NOT mention, and burying them behind the stated tabs is
+         * how a field quietly becomes unfindable. The configuration decides the sequence of what
+         * it names; it cannot push away what it forgot.
          */
         $ordered = array();
 
         if (isset($grouped[self::DEFAULT_TAB])) {
             $ordered[self::DEFAULT_TAB] = $grouped[self::DEFAULT_TAB];
             unset($grouped[self::DEFAULT_TAB]);
+        }
+
+        foreach (array_keys($tabOrder) as $name) {
+            if (isset($grouped[$name])) {
+                $ordered[$name] = $grouped[$name];
+                unset($grouped[$name]);
+            }
         }
 
         $tabs  = array();
