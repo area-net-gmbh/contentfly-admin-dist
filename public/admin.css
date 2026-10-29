@@ -493,6 +493,33 @@ li {
  * and the colour alone never carries the message. It stays above the form until story
  * 002-006-0005 can put a finding at the field that caused it.
  */
+/*
+ * The notice a session expiry leaves behind, delivered without a navigation (007-001-0003).
+ *
+ * THE EMPTY CONTAINER MUST TAKE NO SPACE. It sits in the layout of every admin page, so a
+ * margin on it would push every page down by that much for a message that is almost never
+ * there — hence the styling lives on the filled child, not on the target.
+ *
+ * It borrows the shape of `.admin-form__error` rather than inventing a second one: same left
+ * rule, same surface, so an editor who has seen one recognises the other.
+ */
+#admin-notice:empty {
+    display: none;
+}
+
+.admin-notice {
+    max-width: 44rem;
+    margin: 1.25rem 2rem 0;
+    padding: 0.75rem 1rem;
+    border-left: 3px solid var(--admin-danger);
+    background: var(--admin-danger-surface);
+    color: var(--admin-danger-text);
+}
+
+.admin-notice a {
+    color: inherit;
+}
+
 .admin-form__error {
     max-width: 44rem;
     margin: 0 0 1.25rem;

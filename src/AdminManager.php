@@ -453,12 +453,18 @@ final class AdminManager
                 return null;
             }
 
-            $response = new RedirectResponse($prefix.'/login');
+            $response = self::isTurboSubmit($request)
+                ? self::sessionExpiredStream($prefix)
+                : new RedirectResponse($prefix.'/login');
 
             /*
              * A DEAD COOKIE IS CLEARED ON THE WAY OUT. It is the only thing that distinguishes
              * "never signed in" from "session ran out", and leaving it in place means the browser
              * keeps presenting a token the core has already rejected on every later request.
+             *
+             * IT IS CLEARED ON BOTH ANSWERS. The stream below does not navigate, so the page the
+             * editor keeps looking at is one the dead token would otherwise keep riding along
+             * with — the very situation this clearing exists for.
              */
             $authenticator = $app[AdminAuthenticator::CONTAINER_KEY];
 
@@ -468,6 +474,64 @@ final class AdminManager
 
             return $response;
         }, 0);
+    }
+
+    /**
+     * Whether this request is a Turbo form submission rather than a page visit.
+     *
+     * THE ACCEPT HEADER IS THE TEST, AND IT IS TURBO'S OWN. Turbo sends
+     * `text/vnd.turbo-stream.html` in `Accept` for a form submission and leaves it out of a
+     * plain visit, so the distinction comes from the request itself — not from a new option and
+     * not from a field the package would have to add to every form.
+     *
+     * THE METHOD IS CHECKED TOO. A Turbo *visit* can carry the same header when it was started
+     * with `data-turbo-stream`; what matters here is a submission that carries data worth
+     * keeping, and a `GET` carries none.
+     */
+    private static function isTurboSubmit($request): bool
+    {
+        if ($request->getMethod() === 'GET' || $request->getMethod() === 'HEAD') {
+            return false;
+        }
+
+        return str_contains((string) $request->headers->get('Accept', ''), 'text/vnd.turbo-stream.html');
+    }
+
+    /**
+     * The answer to a submission whose session died on the way: a message, and no navigation.
+     *
+     * WHY THIS KEEPS THE EDITOR'S TYPING, AND NOTHING ELSE COULD. The controller never runs —
+     * the core refuses in `RouteSecurityListener` on `kernel.request` — so there is nobody left
+     * who could re-render the form the way `FormController::reject()` does for a validation
+     * error. What this does instead is *not navigate*: a Turbo Stream is applied to the current
+     * page, so the DOM with everything typed into it simply stays. The values are kept by
+     * leaving them alone, not by sending them back.
+     *
+     * 422 AND NOT 401 OR 302. Turbo treats a redirect as a navigation, which is exactly the
+     * navigation that would throw the form away. 422 is the status the package already uses for
+     * a refused submission (`FormController::reject()`), so the two refusals answer alike.
+     *
+     * THE LINK OPENS IN A NEW TAB on purpose. Signing in *here* would navigate and undo the
+     * whole point; the editor signs in beside the form and presses save again.
+     */
+    private static function sessionExpiredStream(string $prefix): Response
+    {
+        $login = htmlspecialchars($prefix.'/login', ENT_QUOTES, 'UTF-8');
+
+        $html = '<turbo-stream action="replace" target="admin-notice"><template>'
+            .'<div id="admin-notice" aria-live="polite">'
+            .'<p class="admin-notice" role="alert">'
+            .'Deine Anmeldung ist abgelaufen — <strong>es wurde nichts gespeichert</strong>. '
+            .'Deine Eingaben stehen noch hier. '
+            .'<a href="'.$login.'" target="_blank" rel="noopener">Melde dich in einem neuen '
+            .'Tab erneut an</a> und speichere danach noch einmal.'
+            .'</p>'
+            .'</div>'
+            .'</template></turbo-stream>';
+
+        return new Response($html, 422, array(
+            'Content-Type' => 'text/vnd.turbo-stream.html; charset=UTF-8',
+        ));
     }
 
     /**

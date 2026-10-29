@@ -75,6 +75,19 @@
 {% include '_navigation.html.twig' with {menu: menu, logoutUrl: logoutUrl} only %}
 {% endif %}
 {% endblock %}
+{#
+    THE ONE PLACE A MESSAGE CAN ARRIVE WITHOUT A NAVIGATION (007-001-0003).
+
+    It is empty on every normal page and exists only so a Turbo Stream has something to replace.
+    A stream has to name an element by id, and the form's own error paragraph lives inside
+    `{% if error %}` — so on the page where nothing has gone wrong yet there is nothing to aim
+    at, which is exactly the page a session expires on.
+
+    IT SITS IN THE LAYOUT AND NOT IN `form.html.twig` because a session does not only expire
+    during a save: a bulk action, a tree move and an upload all post too, and all of them extend
+    this file.
+#}
+<div id="admin-notice" aria-live="polite"></div>
 {% block content %}{% endblock %}
 </body>
 </html>
