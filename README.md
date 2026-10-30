@@ -5,6 +5,24 @@ renders lists, forms and trees from it; it is a pure API consumer and changes no
 core. Server-rendered Twig, with Turbo for navigation and Stimulus for the interactive
 widgets — no npm build.
 
+## What `1.0` deliberately does not do
+
+Five things are missing on purpose. They are listed here so you can tell a decision from a gap
+before you adopt the package — and so you do not wait for something that was never planned.
+
+| Not in `1.0` | Why | Where it sits instead |
+|---|---|---|
+| **No user, group or permission management** | Permissions are *enforced* from the first release; *maintaining* them is a different job. The admin reads what the core has stored and never keeps a second set — so a management screen here would be a screen over the core's tables, and a rarely used one. | Users and groups are created with the core's console commands. The permission matrix is displayed read-only. A management screen is expected after `1.0`. |
+| **No editorial approval workflow** | An approval step needs states and transitions per record. The core's data model carries none, so the admin would have to invent them — and every other client of the same API, the project's own frontend included, would not know about them. A state only the editor UI understands is not an approval workflow, it is a hidden field. | The core, if and when it carries record states. |
+| **No content versioning** | Same shape as the approval workflow: the core stores one current state per record. Versioning is a property of how data is kept, not of the screen that edits it. | The core. |
+| **No dedicated translation UI** | Translatable entities and per-language permissions are honoured — the admin refuses a language the editor may not write. What is missing is a screen built *for* translating, such as source and target side by side. That is a feature, not a gap in the foundation. | Expected after `1.0`. |
+| **No multi-tenancy** | One installation serves one tenant. There is no use case for anything else yet, and building for an absent one is how a package grows configuration nobody needs. | Open — unplanned rather than postponed. |
+
+Two of these are worth separating: *after `1.0`* and *not this package's job*. The translation UI
+and the management screens are the first kind. The approval workflow, versioning and
+multi-tenancy are the second — they change how data is stored, which is the core's business, and
+no amount of work in this package would make them real.
+
 ## Installing it in a project
 
 ```json
