@@ -153,7 +153,7 @@ On a mismatch the admin answers HTTP 500 with a page naming both versions and th
 instead of rendering a UI that works for about 90 % of the fields: a list that renders, a form
 that saves four fields out of five, an error nobody can place.
 
-Two limits, stated because a compatibility promise wider than its check is worse than no promise:
+Three limits, stated because a compatibility promise wider than its check is worse than no promise:
 
 - **The check runs when an admin route is dispatched, not at bootstrap.** That is deliberate. The
   manager is constructed in every request and every console run of the host project, so refusing
@@ -162,6 +162,12 @@ Two limits, stated because a compatibility promise wider than its check is worse
   `properties` without raising its own version passes this check. The refusal messages say so
   themselves rather than implying a compatibility that was never established; closing the gap
   needs a schema version from the core.
+- **The lower bound of the range is declared, not measured.** `^2.0` admits every 2.x, and
+  `1.0.0` was released having been exercised against **2.5.0** — the version Composer resolves
+  `^2.0` to today. Nothing establishes that 2.0.0 itself carries every core API this admin calls,
+  and neither Composer nor the version check would stop an install on an older 2.x. Running on a
+  core below 2.5.0 is therefore supported by declaration; if that is your case, verify the admin
+  against it rather than trusting the range.
 
 What Composer adds is a different fact: it checks the constraint at install time against package
 metadata. This check compares it against the version the core actually reports while running —
