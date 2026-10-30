@@ -168,6 +168,48 @@ metadata. This check compares it against the version the core actually reports w
 which is the one that drifts, when a core is swapped in place or loaded from outside Composer's
 control.
 
+## Namespace and follow-up packages
+
+The package maps a top-level namespace of its own onto its `src/`:
+
+```json
+{
+    "autoload": {
+        "psr-4": { "Areanet\\ContentflyAdmin\\": "src/" }
+    }
+}
+```
+
+It deliberately does **not** nest under the core's `Areanet\PIM\`, and the reason is worth
+knowing if you are writing a package of your own next to Contentfly. The core maps
+`Areanet\PIM\` onto its **package root** rather than onto a `src/` directory, and that mapping is
+greedy: every top-level directory of the core becomes a namespace segment. A nested
+`Areanet\PIM\Admin\` would in fact resolve — Composer's autoloader shortens the prefix from long
+to short and returns the first file that exists — but the failure it sets up is a silent one. This
+package would **shadow** a same-named core class, so a core update that adds `Admin/Foo.php` would
+have no effect in any project that has this package installed: no error, no warning, decided purely
+by which file happens to exist.
+
+**Nothing is reserved in the core, and that is deliberate.** There is no entry, no placeholder and
+no directory held back for this package. Reserving one would have meant a cross-repository
+convention that exists only in documentation, lives in a repository this package does not control,
+and stays quiet when it is broken. A top-level namespace decouples the two instead: the core may
+add any directory it likes and this package is unaffected. It is collision-free without an
+agreement, because PSR-4 resolves per package — the core neither knows this namespace nor needs
+to.
+
+**The pattern for follow-up packages** pairs the package name `contentfly-<capability>` with the
+namespace `Areanet\Contentfly<Capability>\`:
+
+| Composer package | Namespace |
+|---|---|
+| `areanet/contentfly` | `Areanet\PIM\` |
+| `areanet/contentfly-admin` | `Areanet\ContentflyAdmin\` |
+| `areanet/contentfly-export-word` | `Areanet\ContentflyExportWord\` |
+
+The price is that the namespace no longer visibly sits in the core's family: what a package belongs
+to is readable from its Composer name rather than from its namespace.
+
 ## This repository is generated — do not commit here
 
 **Every tag `v*` on the development repository rewrites this one.** Whatever is committed
