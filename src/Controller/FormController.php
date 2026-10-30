@@ -494,6 +494,40 @@ final class FormController
             $payload['lang'] = $language;
         }
 
+        /*
+         * THE PARENT FROM THE BODY IS CHECKED, NOT ONLY THE ONE FROM THE QUERY (gap `L32`,
+         * ADR 0038). `presetParent()` filters the query parameter and the select offers readable
+         * nodes only, but neither touches a handcrafted POST. Measured on 30.10.2026: the core
+         * takes an unreadable `treeParent` and writes it, so the record lands under a node this
+         * editor cannot see — and `treeSort()` descends from readable roots only (schema contract
+         * 9.2), so it is then missing from their tree. The editor saves, is told it worked, and
+         * the record is gone from their view. The move path already refuses this (`moved=missing`);
+         * the form was the one write path that did not.
+         *
+         * ONE CHECK FOR THREE FAILURES, as `TreeController::move()` does it: an id that is not in
+         * *this* editor's tree is either not a record of this entity, or not readable, or
+         * `isIntern` — and all three have to fail the same way. Telling them apart would say
+         * something about records the editor cannot see.
+         *
+         * THIS IS NOT A PER-RECORD PERMISSION CHECK (ADR 0019 §4): it asks the same entity-wide
+         * tree the select is built from. `OWN`/`GROUP` stay with the core, which still decides
+         * the record being written. The own-subtree exclusion stays where it is (ADR 0025 §3) —
+         * a cycle is gap `L31` and a different question from a parent nobody may read.
+         */
+        if ($this->app[EntityView::CONTAINER_KEY]->isTree($name)) {
+            $wanted = $payload['data'][self::PARENT_PROPERTY] ?? null;
+
+            if (is_string($wanted) && $wanted !== ''
+                && self::findInTree($this->treeRows($request, $name), $wanted) === null) {
+                return $this->reject($request, $name, $id, $fields, $prepared, array(
+                    'ok'       => false,
+                    'readable' => true,
+                    'data'     => null,
+                    'error'    => null,
+                ), $language, 'Der gewählte Elternknoten steht nicht zur Verfügung — es wurde nichts gespeichert. Bitte wähle einen Knoten aus der Liste.');
+            }
+        }
+
         $envelope = $this->callCore($request, $id === null ? '/api/insert' : '/api/update', $payload);
 
         if (!$envelope['ok']) {
