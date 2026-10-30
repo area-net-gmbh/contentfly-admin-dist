@@ -116,6 +116,7 @@ class Offer extends Base
 | `readonly` | Show the value, do not allow editing. | Editable. |
 | `hide` | Keep the field out of the admin. It stays in the API and the database. | Shown. |
 | `required` | Declare the field mandatory. Needed for `file`, `multifile`, `multijoin`, `onejoin`, `checkbox`, `joinbidirectional` and `permissions`, which carry no `nullable` in the schema at all. | The mapping decides. |
+| `rte` | Render a `textarea` as a rich-text editor. The one argument that picks an input element rather than describing the field; a widget registered for the field beats it. | Plain textarea. |
 
 Omitting an argument is not the same as setting it to `false`: an omitted argument leaves the
 inference in charge, a stated `false` overrides it. That is why every argument defaults to
@@ -132,7 +133,8 @@ entity from a third-party package — shaping through a project-side configurati
 the way.
 
 Which input element a given field type becomes, and how to replace one with your own, is
-[docs/field-types.md](docs/field-types.md).
+[docs/field-types.md](docs/field-types.md). Going further than attributes — your own widget, your
+own page, your own action on a record — is [docs/extending.md](docs/extending.md).
 
 ## Compatibility
 

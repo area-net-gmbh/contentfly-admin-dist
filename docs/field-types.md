@@ -133,7 +133,19 @@ The package ships 18 files under `templates/widget/`: one per package key with a
 widget itself. Reading the fragment of the key you are replacing is the fastest way to see which
 variables a widget receives.
 
-Every definition handed to a fragment carries `widget`, `type`, `required`, `readonly`,
-`default` and `overridden`. The keys only some widgets need — `maxlength`, `options`, `group`,
-`target`, `sortable`, `through` — are present only where they apply, so a fragment never has to
-tell "absent" from "empty".
+A fragment receives exactly two variables and nothing else — the include sets `only`:
+
+- **`field`**, with these keys: `property`, `label`, `widget`, `templates`, `type`,
+  `unsupported`, `required`, `maxlength`, `options`, `value`, `values`, `list`, `alias`,
+  `sortable`, `checked`, `error`. All of them are always present, so a fragment never has to tell
+  "absent" from "empty"; the ones a given widget does not need are simply ignored.
+- **`described`**, the id that ties an error message to the control through `aria-describedby`.
+  It is an empty string when the field has no error.
+
+`field.type` carries the core's alias even where several types share a widget key — `number` has
+to know whether it is looking at an `integer` or at a `decimal`, or a browser rejects the
+decimal's own values. `field.unsupported` is true exactly when the field reached `readonly`
+because no element exists for its type, as opposed to being read-only on purpose.
+
+`strict_variables` is on, so a misspelled variable breaks the page instead of rendering nothing.
+That is the same trade as everywhere else here: the loud failure is the cheaper one.
