@@ -12,22 +12,26 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * The permission check that sits next to every whitelist check (ADR 0019).
  *
- * ONE QUESTION, SEVEN PLACES. The whitelist check is written identically in `ListController`,
- * `FormController`, `OptionsController`, `BulkController`, `FileController` (story 003-001),
- * `FilePickerController` (story 003-004) and `TreeController` (story 004-001), and a permission
- * belongs beside each of them. Hiding an entry in the menu is tidiness; this is the part that
- * closes the data. Whoever adds an eighth entry point adds both checks or neither — which is
- * why they read the same in all seven.
+ * ONE QUESTION, TEN PLACES. The whitelist check is written identically in `ListController`,
+ * `FormController`, `OptionsController`, `BulkController`, `RowActionController` (story 005-004),
+ * `FileController` (story 003-001), `FilePickerController` (story 003-004), `TreeController`
+ * (story 004-001), `Page\AbstractAdminPage` (story 005-003) and `Page\AbstractRowAction`
+ * (story 005-004), and a permission belongs beside each of them. Hiding an entry in the menu is
+ * tidiness; this is the part that closes the data. Whoever adds an eleventh entry point adds
+ * both checks or neither — which is why they read the same in all ten.
  *
- * The count was wrong before story 004-001: this text said five and named five while the trait
- * already had six users, because `FilePickerController` was never added to the list. It is
- * spelled out in full above for that reason — a number without the names is a number nobody
- * re-counts.
+ * The count has now been wrong twice, the same way both times. Before story 004-001 this text
+ * said five and named five while the trait already had six users (`FilePickerController` was
+ * never added); until story 007-002 it said seven and named seven while there were ten — the
+ * three page/action entry points of extension stages 3a and 3b were never added. It is spelled
+ * out in full above for that reason — a number without the names is a number nobody re-counts.
+ * The project's checklist of the six permission surfaces is in `an_project/docs/dev-guide.md`.
  *
  * Five of them ask `in_array($name, …)` about an entity taken from the URL. `FileController` and
  * `FilePickerController` ask about a constant, because the file manager is a function rather
  * than a table and has no entity placeholder — the check is the same one, about a name it did
- * not get from the request.
+ * not get from the request. The three in `Page\` take the entity from the action's or page's
+ * own `permission` declaration, which is parsed before it is asked (ADR 0028 §3).
  *
  * IT REFUSES BEFORE THE CORE IS ASKED. The core would refuse too — `Api::getList()` asks
  * `Permission::isReadable()` itself, and the package already catches that answer
