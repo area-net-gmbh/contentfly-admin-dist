@@ -131,6 +131,9 @@ For entities you cannot annotate — the core's own `File`, `Group`, `Tag` and `
 entity from a third-party package — shaping through a project-side configuration file remains
 the way.
 
+Which input element a given field type becomes, and how to replace one with your own, is
+[docs/field-types.md](docs/field-types.md).
+
 ## Compatibility
 
 The admin consumes the schema, so what it really depends on is the **shape** of that schema. That
