@@ -5,7 +5,7 @@
     "license": "MIT",
     "require": {
         "php": "^8.3",
-        "areanet/contentfly": "^2.0",
+        "areanet/contentfly": "^2.5",
         "composer/semver": "^3.4",
         "twig/twig": "^3.0",
         "symfony/http-foundation": "^7.4"
