@@ -47,6 +47,51 @@ The core is a dependency and comes from its own dist repository, so a project th
 already have Contentfly installed needs that repository entry as well — see the README of
 `areanet/contentfly`.
 
+## From installed to running
+
+`composer require` installs the package; it does not by itself give you a running admin. This
+package is a pure API consumer and brings no project scaffolding — what makes a Contentfly project
+boot at all is the **core's** business, and the core expects a handful of files and directories to
+already be in the project. A project that has Contentfly running has them and needs nothing from
+this section. A project set up from scratch to try the admin usually has none of them.
+
+| The host project has to bring | Why |
+|---|---|
+| `index.php` that requires `vendor/autoload.php` and then calls `\Areanet\PIM\Classes\Kernel\Start::web(__DIR__)` | The web entry point. This package registers routes under `prefix`; it does not boot the framework. |
+| `custom/config.php` | The core's project configuration. A project starts from the `config.sample.php` the core ships and lets the installer fill in the database credentials. |
+| `custom/version.php` defining a `CUSTOM_VERSION` constant | The core requires it unconditionally, immediately after `config.php`. `0.0.0` is a fine value for a project that has no version series of its own. |
+| Four traits under `custom/Traits/` — `User.php`, `Group.php`, `File.php`, `Folder.php` | The core's own `User`, `Group`, `File` and `Folder` entities each `use` the matching trait **unconditionally**. They may be empty; they may not be missing. |
+| `custom/Entity/`, even when empty | Doctrine validates the mapping path when it connects, and the core enumerates the project's entities by iterating this directory. |
+| `data/cache/`, `data/files/`, `data/import/`, `data/temp/`, writable | Schema cache, stored files, import and scratch space. |
+| A PSR-4 autoload entry mapping `Custom\` onto `custom/` | Everything above under `custom/` is loaded by class name. |
+
+With those in place the core still has to be installed once: `php bin/console.php appcms:install`
+creates the schema and the first editor and writes the database credentials into
+`custom/config.php`. That console entry point is the project's own file and is built like
+`index.php` — load `vendor/autoload.php`, then call `Start::console(__DIR__)` and run
+`$app['console']`. Until the installation has run, every route answers HTTP 503 with
+`contentfly_general_not_installed`; that one message does name the command to run. Wiring the
+admin itself is the `AdminManager` in `custom/app.php` — see the next section.
+
+**The failure mode is the reason this list is here.** Leave one of these out and nothing fails in
+this package — it fails inside the core, and the message points at core files rather than at the
+project. The three that have actually been hit, with what they say:
+
+- **A missing `custom/version.php`** stops the core before anything else: a fatal from the
+  `require` in the core's own `bootstrap.php`, with a stack trace that names core files only.
+- **A missing trait** ends with `Trait "Custom\Traits\Group" not found`, reported in the core's
+  `Entity/Group.php` — the entity that includes the trait, not the file you have to create.
+- **A missing `custom/Entity/`** is caught by Doctrine while the installation runs: `File mapping
+  drivers must have a valid directory path, however the given path […/custom/Entity] seems to be
+  incorrect!`. That one does name the path. A project that is already installed and loses the
+  directory later gets the admin's own page instead, saying it cannot read the schema.
+
+None of this is specific to the admin — a project needs it with or without this package, and the
+core remains the authority on how a Contentfly project is set up. It is repeated here because the
+core's README covers getting the core *installed*, which is the Composer entry above, while the
+list is what stands between *installed* and *running*. That path is longer than a reader of an
+installation instruction expects, and none of the errors along it point back to either page.
+
 ## Configuration options
 
 The admin is wired into a project by constructing an `AdminManager` in `custom/app.php`:
