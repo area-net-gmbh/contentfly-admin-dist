@@ -750,6 +750,18 @@ final class ListController
 
     /**
      * The reason for a refusal, as a sentence, or an empty string when the core named none.
+     *
+     * THE UNREADABLE CASE NAMES ITS OWN LIMIT AND GUESSES NOTHING. A refusal from
+     * `Api::doDelete()` leaves the core as an error page, not as an envelope (gap L37), so the
+     * code is genuinely unavailable here — and the one cause ever measured for it, a missing
+     * permission on the single record, is offered as a possibility rather than stated. Saying
+     * "Grund: fehlende Berechtigung." would be the same sentence a *named* refusal gets, for a
+     * case where nothing was named.
+     *
+     * AND THE HTTP STATUS IS NOT A SUBSTITUTE, which is why `code()` never asks for it. The
+     * measured answer is a 500 from the core's debug error handler (`Envelope`), not the 403 a
+     * permission refusal would carry — the status says which handler answered, not why. Both
+     * halves are ADR 0041.
      */
     private static function reason(Request $request): string
     {
@@ -762,7 +774,7 @@ final class ListController
         $reasons = array(
             'contentfly_general_access_denied' => ' Grund: fehlende Berechtigung.',
             'contentfly_general_not_found'     => ' Grund: der Datensatz existiert nicht mehr.',
-            BulkController::UNREADABLE         => ' Die Antwort des Grundsystems war nicht auswertbar.',
+            BulkController::UNREADABLE         => ' Den Grund hat das Grundsystem nicht in auswertbarer Form gemeldet. Möglich ist eine fehlende Berechtigung für einzelne Datensätze; belegt ist das hier nicht.',
         );
 
         return $reasons[$code] ?? ' Grund (Meldung des Grundsystems): '.$code.'.';
